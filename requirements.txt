@@ -1,0 +1,6 @@
+diffrax
+jax
+jsrm
+matplotlib
+numpy
+srsm
