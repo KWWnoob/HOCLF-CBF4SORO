@@ -199,6 +199,6 @@ def regulation_objective_example():
     print(f"Cost for q = {q} and q_des = {q_des} is {cost}")
 
 if __name__ == "__main__":
-    # soft_robot_ode_example()
-    # soft_robot_regulation_example()
+    soft_robot_ode_example()
+    soft_robot_regulation_example()
     regulation_objective_example()
