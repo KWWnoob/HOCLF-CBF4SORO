@@ -3,4 +3,5 @@ jax
 jsrm
 matplotlib
 numpy
+opencv-python
 srsm

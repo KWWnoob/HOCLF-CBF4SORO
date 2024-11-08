@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Dict, Tuple
 
 from src.planar_contact_geometry import compute_planar_contact_geometry
+from src.planar_pcs_rendering import draw_image
 
 
 # define the outputs directory
@@ -79,7 +80,6 @@ def static_example():
     # plot the point of minimum distance
     ax.scatter(aux["chi_min_dist"][0], aux["chi_min_dist"][1], c="blue", s=200, marker="x")
     # plot the normal vector
-    print("n_c_min_dist:", n_c_min_dist)
     ax.quiver(
         aux["chi_min_dist"][0],
         aux["chi_min_dist"][1],
@@ -95,6 +95,16 @@ def static_example():
     plt.colorbar(sc, label="d [m]")
     plt.grid(True)
     plt.savefig(outputs_dir / "static_example.pdf")
+    plt.show()
+
+    # draw the image
+    img = draw_image(
+        vmap(forward_kinematics_fn, in_axes=(None, None, 0)), robot_params, q, x_obs, R_obs
+    )
+    plt.figure()
+    plt.imshow(img)
+    plt.axis("off")
+    plt.savefig(outputs_dir / "static_example_rendering.pdf")
     plt.show()
 
 
