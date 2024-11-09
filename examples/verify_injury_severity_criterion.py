@@ -36,6 +36,10 @@ contact_characteristic = dict(
     A_c=jnp.array(1e-4),  # m^2 = 1 cm^2
 )
 
+# set configuration bounds
+q_min = jnp.array([-jnp.pi, -0.2, -0.2])
+q_max = jnp.array([jnp.pi, 0.2, 0.2])
+
 # call the factory for the injury severity criterion
 isc_callables = planar_pcs_injury_severity_criterion_factory(num_segments=num_segments)
 injury_severity_criterion_with_contact_geometry_fn = partial(
@@ -50,15 +54,16 @@ disc_dq_d_fn = jacfwd(injury_severity_criterion_with_contact_geometry_fn, argnum
 
 if __name__ == "__main__":
     # define the configuration
-    q = jnp.array([jnp.pi, 0.1, 0.1])
-    # q_d = jnp.zeros_like(q)
-    q_d = jnp.array([jnp.pi, 0.1, 0.1])
+    # q = jnp.array([jnp.pi, 0.1, 0.1])
+    q = jnp.zeros((3, ))
+    q_d = jnp.zeros_like(q)
+    # q_d = jnp.array([jnp.pi, 0.1, 0.1])
 
     # define the maximum actuation torque
-    tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q, q_d)[3]
+    tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q_max, jnp.zeros_like(q_max))[3]
 
     # define the obstacle
-    x_obs = jnp.array([0.0, 0.1])
+    x_obs = jnp.array([0.008, 0.05])
     R_obs = jnp.array(0.01)
 
     # compute the injury severity criterion
