@@ -1,6 +1,5 @@
 from functools import partial
 import jax
-from sympy.printing.pretty.pretty_symbology import line_width
 
 jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
