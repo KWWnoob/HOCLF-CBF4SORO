@@ -133,7 +133,6 @@ def rotate_obstacle_around_tip_straight_backbone():
     isc_pts, aux_isc_pts = vmap(
         injury_severity_criterion_with_contact_geometry_fn, in_axes=(None, None, None, 0, None)
     )(q, q_d, tau_max, x_obs_pts, R_obs)
-    print("aux keys:", aux_isc_pts.keys())
 
     # plot the injury severity criterion vs. the y-coordinate of the obstacle
     plt.figure(num="Rotate obstacle around tip for straight backbone: Injury Severity Criterion")
@@ -148,9 +147,9 @@ def rotate_obstacle_around_tip_straight_backbone():
     # plot the details of the injury severity criterion
     fig, axes = plt.subplots(1, 1, num="Rotate obstacle around tip for straight backbone: Details")
     axes.plot(varphi_pts, aux_isc_pts["F_c0"], linewidth=3.5, label=r"$F_{c0}$ [N]")
-    axes.plot(varphi_pts, aux_isc_pts["F_c0_el"], linewidth=2.5, label=r"$F_{c0,\mathrm{el}}$ [N]")
+    axes.plot(varphi_pts, aux_isc_pts["F_c0_el"], linewidth=3.0, label=r"$F_{c0,\mathrm{el}}$ [N]")
     axes.plot(varphi_pts, aux_isc_pts["F_c0_tau"], linewidth=2.5, label=r"$F_{c0,\tau}$ [N]")
-    axes.plot(varphi_pts, aux_isc_pts["F_c0_vel"], linewidth=2.5, label=r"$F_{c0,\mathrm{vel}}$ [N]")
+    axes.plot(varphi_pts, aux_isc_pts["F_c0_vel"], linewidth=2.0, label=r"$F_{c0,\mathrm{vel}}$ [N]")
     axes.set_xlabel(r"Obstacle polar angle around tip $\varphi$ [rad]")
     axes.set_ylabel(r"Force [N]")
     axes.legend()
@@ -158,6 +157,24 @@ def rotate_obstacle_around_tip_straight_backbone():
     plt.tight_layout()
     plt.savefig(outputs_dir / "rotate_obstacle_around_tip_straight_backbone_details.pdf")
     plt.show()
+
+    # plt.plot(varphi_pts, aux_isc_pts["s_min_dist"], label="s_min_dist")
+    # plt.show()
+    #
+    # plt.plot(varphi_pts, aux_isc_pts["n_c_min_dist"][:, 0], label="n_c(0)")
+    # plt.plot(varphi_pts, aux_isc_pts["n_c_min_dist"][:, 1], label="n_c(1)")
+    # plt.legend()
+    # plt.show()
+    #
+    # # compute the estimated polar angle
+    # varphi_est = jnp.arctan2(aux_isc_pts["n_c_min_dist"][:, 1], aux_isc_pts["n_c_min_dist"][:, 0])
+    # print("varphi_est:", varphi_est)
+    # plt.plot(varphi_pts, varphi_est, linewidth=3.5, label=r"$\hat{\varphi}$")
+    # plt.plot(varphi_pts, varphi_pts, label=r"$\varphi$")
+    # plt.legend()
+    # plt.show()
+
+
 
 if __name__ == "__main__":
     # define the configuration
