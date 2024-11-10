@@ -8,6 +8,7 @@ os.environ["DDE_BACKEND"] = "jax"
 from jax import Array, jacfwd, jit, vmap
 from jax import numpy as jnp
 import matplotlib.pyplot as plt
+from matplotlib import cm, ticker
 from pathlib import Path
 from srsm.planar_pcs_injury_severity_criterion import planar_pcs_injury_severity_criterion_factory
 from typing import Callable, Dict
@@ -113,6 +114,42 @@ def sweep_obstacle_vertically_along_straight_backbone():
     plt.savefig(outputs_dir / "vertical_obstacle_position_sweep_straight_backbone_derivative.pdf")
     plt.show()
 
+def sweep_obstacle_on_planar_surface_for_straight_backbone():
+    # define the obstacle
+    x1_obs_grid, x2_obs_grid = jnp.meshgrid(
+        jnp.linspace(-0.015, 0.015, 100), jnp.linspace(-0.02, 0.12, 100)
+    )
+    x_obs_pts = jnp.stack([x1_obs_grid.flatten(), x2_obs_grid.flatten()], axis=-1)
+    R_obs = jnp.array(0.01)
+
+    # define the configuration
+    q = jnp.zeros((3,))
+    q_d = jnp.zeros_like(q)
+
+    # define the maximum actuation torque
+    tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q_max, jnp.zeros_like(q_max))[3]
+
+    isc_pts, aux_isc_pts = vmap(
+        injury_severity_criterion_with_contact_geometry_fn, in_axes=(None, None, None, 0, None)
+    )(q, q_d, tau_max, x_obs_pts, R_obs)
+
+    # reshape the arrays
+    isc_grid = isc_pts.reshape(x1_obs_grid.shape)
+    isc_log_grid = jnp.log(isc_grid)
+
+    # plot the injury severity criterion as contour plot
+    plt.figure(num="Sweep obstacle on planar surface for straight backbone: Injury Severity Criterion")
+    plt.contourf(x1_obs_grid, x2_obs_grid, isc_log_grid, levels=100)
+    # # plot the contour lines
+    # plt.contour(x1_obs_grid, x2_obs_grid, isc_grid, levels=100, colors="k", linewidths=0.5)
+    plt.xlabel(r"$x_\mathrm{obs}$ [m]")
+    plt.ylabel(r"$y_\mathrm{obs}$ [m]")
+    plt.colorbar(label=r"$\log(\mathrm{ISC})$")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "obstacle_on_planar_surface_sweep_straight_backbone.pdf")
+    plt.show()
+
 
 def rotate_obstacle_around_tip_straight_backbone():
     # define the obstacle
@@ -203,4 +240,6 @@ if __name__ == "__main__":
     disc_dq_d, _ = disc_dq_d_fn(q, q_d, tau_max, x_obs, R_obs)
     print("disc_dq_d:\n", disc_dq_d)
 
-    sweep_obstacle_vertically_along_straight_backbone()    rotate_obstacle_around_tip_straight_backbone()
+    sweep_obstacle_vertically_along_straight_backbone()
+    sweep_obstacle_on_planar_surface_for_straight_backbone()
+    rotate_obstacle_around_tip_straight_backbone()
