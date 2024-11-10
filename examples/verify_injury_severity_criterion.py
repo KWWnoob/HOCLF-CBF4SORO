@@ -50,7 +50,7 @@ q_max = jnp.array([jnp.pi, 0.2, 0.2])
 isc_callables = planar_pcs_injury_severity_criterion_factory(num_segments=num_segments)
 injury_severity_criterion_with_contact_geometry_fn = partial(
     injury_severity_criterion_with_contact_geometry, isc_callables, robot_params, contact_characteristic,
-    num_backbone_samples=250
+    num_backbone_samples=500
 )
 
 # jacobian function of the injury severity criterion w.r.t. the configuration
@@ -77,14 +77,86 @@ def sweep_obstacle_vertically_along_straight_backbone():
         injury_severity_criterion_with_contact_geometry_fn, in_axes=(None, None, None, 0, None)
     )(q, q_d, tau_max, x_obs_pts, R_obs)
 
+    disc_dq_pts, _ = vmap(
+        disc_dq_fn, in_axes=(None, None, None, 0, None)
+    )(q, q_d, tau_max, x_obs_pts, R_obs)
+
     # plot the injury severity criterion vs. the y-coordinate of the obstacle
-    plt.figure(num="Sweep vertical obstacle position for straight backbone")
+    plt.figure(num="Sweep vertical obstacle position for straight backbone: Injury Severity Criterion")
     plt.plot(x2_obs_pts, isc_pts)
     plt.xlabel(r"$y_\mathrm{obs}$ [m]")
     plt.ylabel(r"Injury Severity Criterion [Pa]")
     plt.grid()
     plt.tight_layout()
     plt.savefig(outputs_dir / "vertical_obstacle_position_sweep_straight_backbone.pdf")
+    plt.show()
+
+    # plot the derivative w.r.t. to the configuration
+    fig, axes = plt.subplots(
+        3, 1,
+        figsize=(5, 10),
+        num="Sweep vertical obstacle position for straight backbone: Derivative w.r.t. q"
+    )
+    axes[0].plot(
+        x2_obs_pts, disc_dq_pts[:, 0], linewidth=2.5, label=r"$\frac{\partial \mathrm{ISC}}{\partial \kappa_\mathrm{be}}$"
+    )
+    axes[1].plot(x2_obs_pts, disc_dq_pts[:, 1], linewidth=2.5, label=r"$\frac{\partial \mathrm{ISC}}{\partial \sigma_\mathrm{sh}}$")
+    axes[2].plot(x2_obs_pts, disc_dq_pts[:, 1], linewidth=2.5, label=r"$\frac{\partial \mathrm{ISC}}{\partial \sigma_\mathrm{ax}}$")
+    axes[0].set_ylabel(r"$\frac{\partial \mathrm{ISC}}{\partial \kappa_\mathrm{be}}$")
+    axes[1].set_ylabel(r"$\frac{\partial \mathrm{ISC}}{\partial \sigma_\mathrm{sh}}$")
+    axes[2].set_ylabel(r"$\frac{\partial \mathrm{ISC}}{\partial \sigma_\mathrm{ax}}$")
+    for ax in axes:
+        ax.set_xlabel(r"$y_\mathrm{obs}$ [m]")
+        ax.grid()
+        ax.legend()
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "vertical_obstacle_position_sweep_straight_backbone_derivative.pdf")
+    plt.show()
+
+
+def rotate_obstacle_around_tip_straight_backbone():
+    # define the obstacle
+    num_points = 1000
+    varphi_pts = jnp.linspace(-jnp.pi, jnp.pi, num_points)
+    r = 0.008
+    x_obs_pts = jnp.array([0.0, 0.1])[None, :] + r * jnp.stack([
+        jnp.cos(varphi_pts), jnp.sin(varphi_pts)
+    ], axis=-1)
+    R_obs = jnp.array(0.01)
+
+    # define the configuration
+    q = jnp.zeros((3,))
+    q_d = jnp.zeros_like(q)
+    # define the maximum actuation torque
+    tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q_max, jnp.zeros_like(q_max))[3]
+
+    isc_pts, aux_isc_pts = vmap(
+        injury_severity_criterion_with_contact_geometry_fn, in_axes=(None, None, None, 0, None)
+    )(q, q_d, tau_max, x_obs_pts, R_obs)
+    print("aux keys:", aux_isc_pts.keys())
+
+    # plot the injury severity criterion vs. the y-coordinate of the obstacle
+    plt.figure(num="Rotate obstacle around tip for straight backbone: Injury Severity Criterion")
+    plt.plot(varphi_pts, isc_pts)
+    plt.xlabel(r"Obstacle polar angle around tip $y_\mathrm{obs}$ [m]")
+    plt.ylabel(r"Injury Severity Criterion [Pa]")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "rotate_obstacle_around_tip_straight_backbone.pdf")
+    plt.show()
+
+    # plot the details of the injury severity criterion
+    fig, axes = plt.subplots(1, 1, num="Rotate obstacle around tip for straight backbone: Details")
+    axes.plot(varphi_pts, aux_isc_pts["F_c0"], linewidth=3.5, label=r"$F_{c0}$ [N]")
+    axes.plot(varphi_pts, aux_isc_pts["F_c0_el"], linewidth=2.5, label=r"$F_{c0,\mathrm{el}}$ [N]")
+    axes.plot(varphi_pts, aux_isc_pts["F_c0_tau"], linewidth=2.5, label=r"$F_{c0,\tau}$ [N]")
+    axes.plot(varphi_pts, aux_isc_pts["F_c0_vel"], linewidth=2.5, label=r"$F_{c0,\mathrm{vel}}$ [N]")
+    axes.set_xlabel(r"Obstacle polar angle around tip $\varphi$ [rad]")
+    axes.set_ylabel(r"Force [N]")
+    axes.legend()
+    axes.grid()
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "rotate_obstacle_around_tip_straight_backbone_details.pdf")
     plt.show()
 
 if __name__ == "__main__":
@@ -114,4 +186,4 @@ if __name__ == "__main__":
     disc_dq_d, _ = disc_dq_d_fn(q, q_d, tau_max, x_obs, R_obs)
     print("disc_dq_d:\n", disc_dq_d)
 
-    sweep_obstacle_vertically_along_straight_backbone()
+    sweep_obstacle_vertically_along_straight_backbone()    rotate_obstacle_around_tip_straight_backbone()
