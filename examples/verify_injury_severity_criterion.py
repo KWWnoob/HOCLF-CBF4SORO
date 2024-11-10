@@ -141,7 +141,7 @@ def sweep_obstacle_on_planar_surface_for_straight_backbone():
     plt.figure(num="Sweep obstacle on planar surface for straight backbone: Injury Severity Criterion")
     plt.contourf(x1_obs_grid, x2_obs_grid, isc_log_grid, levels=100)
     # # plot the contour lines
-    # plt.contour(x1_obs_grid, x2_obs_grid, isc_grid, levels=100, colors="k", linewidths=0.5)
+    # plt.contour(x1_obs_grid, x2_obs_grid, isc_log_grid, levels=100, colors="k", linewidths=0.5)
     plt.xlabel(r"$x_\mathrm{obs}$ [m]")
     plt.ylabel(r"$y_\mathrm{obs}$ [m]")
     plt.colorbar(label=r"$\log(\mathrm{ISC})$")
@@ -211,6 +211,46 @@ def rotate_obstacle_around_tip_straight_backbone():
     # plt.legend()
     # plt.show()
 
+def sweep_configuration_space_static_obstacle():
+    # define the configuration space samples
+    kappa_be_grid, sigma_ax_grid = jnp.meshgrid(
+        jnp.linspace(q_min[0], q_max[0], 100), jnp.linspace(0.0, q_max[2], 100)
+    )
+    sigma_sh_grid = jnp.zeros_like(kappa_be_grid)
+    # define the configuration-space grid
+    q_grid = jnp.stack([kappa_be_grid, sigma_sh_grid, sigma_ax_grid], axis=-1)
+    # reshape to points
+    q_pts = q_grid.reshape(-1, q_grid.shape[-1])
+    q_d_pts = jnp.zeros_like(q_pts)
+
+    # define the obstacle
+    x_obs = jnp.array([0.0, 0.11])
+    R_obs = jnp.array(0.01)
+
+    # define the maximum actuation torque
+    tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q_max, jnp.zeros_like(q_max))[3]
+
+    isc_pts, aux_isc_pts = vmap(
+        injury_severity_criterion_with_contact_geometry_fn, in_axes=(0, 0, None, None, None)
+    )(q_pts, q_d_pts, tau_max, x_obs, R_obs)
+
+    # reshape the arrays
+    isc_grid = isc_pts.reshape(kappa_be_grid.shape)
+    isc_log_grid = jnp.log(isc_grid)
+
+    # plot the injury severity criterion as contour plot
+    plt.figure(num="Sweep configuration space for static obstacle: Injury Severity Criterion")
+    plt.contourf(kappa_be_grid, sigma_ax_grid, isc_log_grid, levels=100)
+    # # plot the contour lines
+    # plt.contour(kappa_be_grid, sigma_ax_grid, isc_log_grid, levels=100, colors="k", linewidths=0.5)
+    plt.xlabel(r"$\kappa_\mathrm{be}$ [rad]")
+    plt.ylabel(r"$\sigma_\mathrm{ax}$ [m]")
+    plt.colorbar(label=r"$\log(\mathrm{ISC})$")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "sweep_configuration_space_static_obstacle.pdf")
+    plt.show()
+
 
 
 if __name__ == "__main__":
@@ -243,3 +283,4 @@ if __name__ == "__main__":
     sweep_obstacle_vertically_along_straight_backbone()
     sweep_obstacle_on_planar_surface_for_straight_backbone()
     rotate_obstacle_around_tip_straight_backbone()
+    sweep_configuration_space_static_obstacle()
