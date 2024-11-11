@@ -6,14 +6,19 @@ jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
 from jax import Array, jacfwd, jit, vmap
 from jax import numpy as jnp
+import jsrm
+from jsrm.systems import planar_pcs
 import matplotlib.pyplot as plt
 import numpy as onp
 from pathlib import Path
 from typing import Callable, Dict, Tuple
 
-import jsrm
-from jsrm.systems import planar_pcs
+from src.img_animation import animate_images_cv2
+from src.planar_pcs_rendering import draw_image
 
+# define the outputs directory
+outputs_dir = Path("outputs") / "planar_pcs_simulation"
+outputs_dir.mkdir(parents=True, exist_ok=True)
 
 # load symbolic expressions
 num_segments = 1
@@ -40,6 +45,10 @@ strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 # call the factory function for the planar PCS
 strain_basis, forward_kinematics_fn, dynamical_matrices_fn, auxiliary_fns = planar_pcs.factory(sym_exp_filepath, strain_selector)
 
+# construct batched forward kinematics function
+batched_forward_kinematics_fn = vmap(
+    forward_kinematics_fn, in_axes=(None, None, 0)
+)
 
 def soft_robot_ode_example():
     # define the ODE function
@@ -97,6 +106,15 @@ def soft_robot_ode_example():
     plt.tight_layout()
     plt.show()
 
+    # animate the motion
+    img_ts = []
+    for q in q_ts[::20]:
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q)
+        img_ts.append(img)
+    img_ts = onp.stack(img_ts, axis=0)
+    animate_images_cv2(
+        onp.array(ts[::20]), img_ts, outputs_dir / "planar_pcs_open_loop_simulation.mp4"
+    )
 
 def soft_robot_regulation_example():
     # define the ODE function
@@ -175,6 +193,16 @@ def soft_robot_regulation_example():
         ax.grid(True)
     plt.tight_layout()
     plt.show()
+
+    # animate the motion
+    img_ts = []
+    for q in q_ts[::20]:
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q)
+        img_ts.append(img)
+    img_ts = onp.stack(img_ts, axis=0)
+    animate_images_cv2(
+        onp.array(ts[::20]), img_ts, outputs_dir / "planar_pcs_closed_loop_simulation.mp4"
+    )
 
 def regulation_objective_example():
     # cost function weights

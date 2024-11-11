@@ -1,3 +1,4 @@
+__all__ = ["injury_severity_criterion_with_contact_geometry_fn"]
 from functools import partial
 import jax
 from jax import Array, jacfwd, jit, lax, vmap

@@ -2,6 +2,8 @@ from functools import partial
 import jax
 import os
 
+from examples.verify_contact_geometry import auxiliary_fns
+
 jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
 os.environ["DDE_BACKEND"] = "jax"
@@ -9,6 +11,7 @@ from jax import Array, jacfwd, jit, vmap
 from jax import numpy as jnp
 import matplotlib.pyplot as plt
 from matplotlib import cm, ticker
+import numpy as onp
 from pathlib import Path
 from srsm.planar_pcs_injury_severity_criterion import planar_pcs_injury_severity_criterion_factory
 from typing import Callable, Dict
@@ -16,6 +19,8 @@ from typing import Callable, Dict
 from src.contact_aware_planar_pcs_injury_severity_criterion import (
     injury_severity_criterion_with_contact_geometry_fn as injury_severity_criterion_with_contact_geometry
 )
+from src.img_animation import animate_images_cv2
+from src.planar_pcs_rendering import draw_image
 
 # define the outputs directory
 outputs_dir = Path("outputs") / "injury_severity_criterion_with_contact_geometry"
@@ -58,6 +63,12 @@ injury_severity_criterion_with_contact_geometry_fn = partial(
 disc_dq_fn = jacfwd(injury_severity_criterion_with_contact_geometry_fn, argnums=0, has_aux=True)
 # jacobian function of the injury severity criterion w.r.t. the configuration velocity
 disc_dq_d_fn = jacfwd(injury_severity_criterion_with_contact_geometry_fn, argnums=1, has_aux=True)
+
+# construct batched forward kinematics function
+batched_forward_kinematics_fn = vmap(
+    isc_callables["forward_kinematics_fn"], in_axes=(None, None, 0)
+)
+auxiliary_fns = isc_callables["auxiliary_fns"]
 
 
 def sweep_obstacle_vertically_along_straight_backbone():
@@ -216,6 +227,15 @@ def rotate_obstacle_around_tip_straight_backbone():
     plt.legend()
     plt.grid(True)
     plt.show()
+
+    img_pts = []
+    for i, varphi in enumerate(varphi_pts):
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs_pts[i], R_obs)
+        img_pts.append(img)
+    img_pts = onp.stack(img_pts, axis=0)
+    print("img_pts.shape:", img_pts.shape)
+    animation_ts = onp.linspace(0.0, 30.0, num_points)
+    animate_images_cv2(animation_ts, img_pts, outputs_dir / "rotate_obstacle_around_tip_straight_backbone.mp4")
 
 def sweep_configuration_space_static_obstacle():
     # define the configuration space samples

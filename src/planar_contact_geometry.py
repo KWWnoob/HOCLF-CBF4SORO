@@ -1,3 +1,4 @@
+__all__ = ["compute_planar_contact_geometry"]
 from jax import Array, jacfwd, jit, lax, vmap
 from jax import numpy as jnp
 import numpy as onp

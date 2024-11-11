@@ -1,3 +1,4 @@
+__all__ = ["draw_image"]
 import cv2  # importing cv2
 from jax import Array, jacfwd, jit, lax, vmap
 from jax import numpy as jnp
@@ -10,8 +11,8 @@ def draw_image(
     auxiliary_fns: Dict[str, Callable],
     robot_params: Dict[str, Array],
     q: Array,
-    x_obs: Array,
-    R_obs: Union[float, Array],
+    x_obs: Optional[Array] = None,
+    R_obs: Optional[Union[float, Array]] = None,
     img_width: int = 700,
     img_height: int = 700,
     num_points: int = 50,
@@ -68,6 +69,9 @@ def draw_image(
         cv2.polylines(
             img, [curve[segment_ps_selector]], isClosed=False, color=robot_color, thickness=segment_thickness
         )
+
+    if x_obs is None or R_obs is None:
+        return img
 
     # draw the obstacle
     uv_obs = onp.array((curve_origin + x_obs * ppm), dtype=onp.int32)
