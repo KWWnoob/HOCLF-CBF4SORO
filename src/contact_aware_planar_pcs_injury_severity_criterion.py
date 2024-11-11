@@ -17,7 +17,7 @@ def injury_severity_criterion_with_contact_geometry_fn(
     tau_max: Array,
     x_obs: Array,
     R_obs: Array,
-    num_backbone_samples: int = 100,
+    num_backbone_samples: int = 250,
 ):
     """
     Compute the injury severity criterion by considering contact geometry.
@@ -40,21 +40,23 @@ def injury_severity_criterion_with_contact_geometry_fn(
         isc_callables["forward_kinematics_fn"], isc_callables["auxiliary_fns"], robot_params, q, x_obs, R_obs,
         num_backbone_samples=num_backbone_samples
     )
+    # s_min_dist and n_c_min_dist are equal to s_c and n_c
+    s_c, n_c = s_min_dist, n_c_min_dist
 
     # compute the penetration depth at the beginning of the collision
     delta_c0 = jnp.maximum(0.0, -d_min)
 
     # evaluate the injury severity criterion
     isc, aux_isc = isc_callables["injury_severity_criterion_fn"](
-        robot_params, contact_characteristic, q, q_d, s_min_dist, n_c_min_dist, tau_max, delta_c0=delta_c0,
+        robot_params, contact_characteristic, q, q_d, s_c, n_c, tau_max, delta_c0=delta_c0,
         apply_actuation_norm=True
     )
 
     aux_isc = aux_isc | dict(
         delta_c0=delta_c0,
         d_min=d_min,
-        s_min_dist=s_min_dist,
-        n_c_min_dist=n_c_min_dist,
+        s_c=s_c,
+        n_c=n_c,
     )
 
     isc = lax.select(d_min <= 0.0, isc, jnp.zeros_like(isc))

@@ -128,7 +128,7 @@ def sweep_obstacle_vertically_along_straight_backbone():
 def sweep_obstacle_on_planar_surface_for_straight_backbone():
     # define the obstacle
     x1_obs_grid, x2_obs_grid = jnp.meshgrid(
-        jnp.linspace(-4e-2, 4e-2, 100), jnp.linspace(-0.02, 0.12, 100)
+        jnp.linspace(-4e-2, 4e-2, 150), jnp.linspace(-0.01, 0.14, 150)
     )
     x_obs_pts = jnp.stack([x1_obs_grid.flatten(), x2_obs_grid.flatten()], axis=-1)
     R_obs = jnp.array(0.01)
@@ -206,14 +206,14 @@ def rotate_obstacle_around_tip_straight_backbone():
     plt.savefig(outputs_dir / "rotate_obstacle_around_tip_straight_backbone_details.pdf")
     plt.show()
 
-    plt.plot(varphi_pts, aux_isc_pts["s_min_dist"], label="s_min_dist")
+    plt.plot(varphi_pts, aux_isc_pts["s_c"], label=r"$s_\mathrm{c}$")
     plt.grid(True)
     plt.xlabel(r"Obstacle polar angle around tip $\varphi$ [rad]")
     plt.ylabel(r"Backbone coordinate with minimum distance $s_\mathrm{min}$ [m]")
     plt.show()
 
-    plt.plot(varphi_pts, aux_isc_pts["n_c_min_dist"][:, 0], label=r"$n_\mathrm{c}(0)$")
-    plt.plot(varphi_pts, aux_isc_pts["n_c_min_dist"][:, 1], label=r"$n_\mathrm{c}(1)$")
+    plt.plot(varphi_pts, aux_isc_pts["n_c"][:, 0], label=r"$n_\mathrm{c}(0)$")
+    plt.plot(varphi_pts, aux_isc_pts["n_c"][:, 1], label=r"$n_\mathrm{c}(1)$")
     plt.legend()
     plt.grid(True)
     plt.xlabel(r"Obstacle polar angle around tip $\varphi$ [rad]")
@@ -221,7 +221,7 @@ def rotate_obstacle_around_tip_straight_backbone():
     plt.show()
 
     # compute the estimated polar angle
-    varphi_est = jnp.arctan2(aux_isc_pts["n_c_min_dist"][:, 1], aux_isc_pts["n_c_min_dist"][:, 0])
+    varphi_est = jnp.arctan2(aux_isc_pts["n_c"][:, 1], aux_isc_pts["n_c"][:, 0])
     plt.plot(varphi_pts, varphi_est, linewidth=3.5, label=r"$\hat{\varphi}$")
     plt.plot(varphi_pts, varphi_pts, label=r"$\varphi$")
     plt.legend()
@@ -239,7 +239,7 @@ def rotate_obstacle_around_tip_straight_backbone():
 def sweep_configuration_space_static_obstacle():
     # define the configuration space samples
     kappa_be_grid, sigma_ax_grid = jnp.meshgrid(
-        jnp.linspace(q_min[0], q_max[0], 100), jnp.linspace(0.0, q_max[2], 100)
+        jnp.linspace(-2*jnp.pi, 2*jnp.pi, 100), jnp.linspace(0.0, 1.0, 100)
     )
     sigma_sh_grid = jnp.zeros_like(kappa_be_grid)
     # define the configuration-space grid
@@ -249,8 +249,8 @@ def sweep_configuration_space_static_obstacle():
     q_d_pts = jnp.zeros_like(q_pts)
 
     # define the obstacle
-    x_obs = jnp.array([0.0, 0.11])
-    R_obs = jnp.array(0.01)
+    x_obs = jnp.array([0.0, 0.14])
+    R_obs = jnp.array(1e-2)
 
     # define the maximum actuation torque
     tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q_max, jnp.zeros_like(q_max))[3]
