@@ -27,14 +27,17 @@ def draw_image(
         img_height: image height
         num_points: number of points along the robot to plot
     """
+    # compute the total length of the robot
+    L = jnp.sum(robot_params["l"])
+
     # plotting in OpenCV
     h, w = img_height, img_width  # img height and width
-    ppm = h / (2.0 * jnp.sum(robot_params["l"]))  # pixel per meter
+    ppm = h / (2.0 * L)  # pixel per meter
     base_color = (0, 0, 0)  # black robot_color in BGR
     robot_color = (255, 0, 0)  # black robot_color in BGR
 
     # we use for plotting N points along the length of the robot
-    s_ps = jnp.linspace(0, jnp.sum(robot_params["l"]), num_points)
+    s_ps = jnp.linspace(0, L, num_points)
 
     # poses along the robot of shape (3, N)
     chi_ps = batched_forward_kinematics_fn(robot_params, q, s_ps)
@@ -48,15 +51,15 @@ def draw_image(
     cv2.rectangle(img, (0, h - curve_origin[1]), (w, h), color=base_color, thickness=-1)
     # transform robot poses to pixel coordinates
     # should be of shape (N, 2)
-    curve = onp.array((curve_origin + chi_ps[:2, :].T * ppm), dtype=onp.int32)
+    curve = onp.array((curve_origin + chi_ps[:, :2] * ppm), dtype=onp.int32)
     # invert the v pixel coordinate
     curve[:, 1] = h - curve[:, 1]
     cv2.polylines(img, [curve], isClosed=False, color=robot_color, thickness=10)
 
-    # # draw the obstacle
-    # uv_obs = onp.array((curve_origin + x_obs * ppm), dtype=onp.int32)
-    # # invert the v pixel coordinate
-    # uv_obs[1] = h - uv_obs[1]
-    # cv2.circle(img, tuple(uv_obs), int(R_obs * ppm), (0, 255, 0), thickness=-1)
+    # draw the obstacle
+    uv_obs = onp.array((curve_origin + x_obs * ppm), dtype=onp.int32)
+    # invert the v pixel coordinate
+    uv_obs[1] = h - uv_obs[1]
+    cv2.circle(img, tuple(uv_obs), int(R_obs * ppm), (0, 255, 0), thickness=-1)
 
     return img
