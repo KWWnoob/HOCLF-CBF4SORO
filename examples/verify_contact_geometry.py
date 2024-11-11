@@ -59,7 +59,7 @@ def static_example():
 
     # compute the backbone distances
     d_min, s_min_dist, n_c_min_dist, aux = compute_planar_contact_geometry(
-        forward_kinematics_fn, robot_params, q, x_obs, R_obs
+        forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs, R_obs
     )
 
     # print("d_min:", d_min)
@@ -98,7 +98,7 @@ def static_example():
 
     # draw the image
     img = draw_image(
-        vmap(forward_kinematics_fn, in_axes=(None, None, 0)), robot_params, q, x_obs, R_obs
+        vmap(forward_kinematics_fn, in_axes=(None, None, 0)), auxiliary_fns, robot_params, q, x_obs, R_obs
     )
     plt.figure()
     plt.imshow(img)

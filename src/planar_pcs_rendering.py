@@ -7,6 +7,7 @@ from typing import Callable, Dict, Optional, Tuple, Union
 
 def draw_image(
     batched_forward_kinematics_fn: Callable,
+    auxiliary_fns: Dict[str, Callable],
     robot_params: Dict[str, Array],
     q: Array,
     x_obs: Array,
@@ -38,9 +39,13 @@ def draw_image(
 
     # we use for plotting N points along the length of the robot
     s_ps = jnp.linspace(0, L, num_points)
+    segment_idx_ps, _ = auxiliary_fns["classify_segment"](robot_params, s_ps)
 
     # poses along the robot of shape (3, N)
     chi_ps = batched_forward_kinematics_fn(robot_params, q, s_ps)
+
+    # the equilbrium distance between the backbone and the obstacle is the sum of the radii of the obstacle and the backbone
+    r_backbone_ps = robot_params["r"][segment_idx_ps]
 
     img = 255 * onp.ones((w, h, 3), dtype=jnp.uint8)  # initialize background to white
     curve_origin = onp.array(
@@ -54,7 +59,15 @@ def draw_image(
     curve = onp.array((curve_origin + chi_ps[:, :2] * ppm), dtype=onp.int32)
     # invert the v pixel coordinate
     curve[:, 1] = h - curve[:, 1]
-    cv2.polylines(img, [curve], isClosed=False, color=robot_color, thickness=10)
+    for segment_idx in jnp.unique(segment_idx_ps):
+        segment_ps_selector = segment_idx_ps == segment_idx
+        # determine the segment thickness
+        segment_radius = r_backbone_ps[segment_ps_selector].item()
+        segment_thickness = int(2 * segment_radius * ppm)
+        # draw the robot
+        cv2.polylines(
+            img, [curve[segment_ps_selector]], isClosed=False, color=robot_color, thickness=segment_thickness
+        )
 
     # draw the obstacle
     uv_obs = onp.array((curve_origin + x_obs * ppm), dtype=onp.int32)

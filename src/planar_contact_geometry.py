@@ -6,6 +6,7 @@ from typing import Callable, Dict, Optional, Tuple, Union
 
 def compute_planar_contact_geometry(
     forward_kinematics_fn: Callable,
+    auxiliary_fns: Dict[str, Callable],
     robot_params: Dict[str, Array],
     q: Array,
     x_obs: Array,
@@ -16,6 +17,7 @@ def compute_planar_contact_geometry(
     Compute the minimum distance of the backbone from the obstacle.
     Args:
         forward_kinematics_fn: function to compute the forward kinematics
+        auxiliary_fns: dictionary with auxiliary functions
         robot_params: dictionary with robot parameters
         q: joint angles
         x_obs: planar position of the obstacle
@@ -30,9 +32,15 @@ def compute_planar_contact_geometry(
     # get the backbone points
     s_pts = onp.linspace(0.0, 1.0, num_backbone_samples) * jnp.sum(robot_params["l"])
     chi_pts = vmap(forward_kinematics_fn, in_axes=(None, None, 0))(robot_params, q, s_pts)
+    segment_idx_pts, _ = auxiliary_fns["classify_segment"](robot_params, s_pts)
 
-    # compute the distances of the backbone points from the obstacle
-    d_pts = jnp.linalg.norm(chi_pts[:, :2] - x_obs, axis=-1) - R_obs
+    # the equilbrium distance between the backbone and the obstacle is the sum of the radii of the obstacle and the backbone
+    r_backbone_pts = robot_params["r"][segment_idx_pts]
+    r_obs_pts = R_obs * jnp.ones_like(r_backbone_pts)
+    r_eq_pts = r_backbone_pts + r_obs_pts
+
+    # compute the distances of the backbone surface points from the obstacle surface
+    d_pts = jnp.linalg.norm(chi_pts[:, :2] - x_obs, axis=-1) - r_eq_pts
 
     # determine the minimum distance and the associated backbone coordinate
     d_min = jnp.min(d_pts)

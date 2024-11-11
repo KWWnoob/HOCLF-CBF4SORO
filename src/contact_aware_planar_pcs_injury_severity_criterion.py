@@ -36,7 +36,8 @@ def injury_severity_criterion_with_contact_geometry_fn(
     """
     # evaluate the contact geometry
     d_min, s_min_dist, n_c_min_dist, aux_contact_geometry = compute_planar_contact_geometry(
-        isc_callables["forward_kinematics_fn"], robot_params, q, x_obs, R_obs, num_backbone_samples=num_backbone_samples
+        isc_callables["forward_kinematics_fn"], isc_callables["auxiliary_fns"], robot_params, q, x_obs, R_obs,
+        num_backbone_samples=num_backbone_samples
     )
 
     # evaluate the injury severity criterion
