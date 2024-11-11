@@ -12,7 +12,7 @@ def compute_planar_contact_geometry(
     q: Array,
     x_obs: Array,
     R_obs: Union[float, Array],
-    num_backbone_samples: int = 100,
+    num_backbone_samples: int = 250,
 ) -> Tuple[Array, Array, Array, Dict[str, Array]]:
     """
     Compute the minimum distance of the backbone from the obstacle.
