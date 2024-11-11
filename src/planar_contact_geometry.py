@@ -45,6 +45,7 @@ def compute_planar_contact_geometry(
     # determine the minimum distance and the associated backbone coordinate
     d_min = jnp.min(d_pts)
     min_distance_idx = jnp.argmin(d_pts)
+    # min_distance_idx = d_pts.shape[0] - 1
     s_min_dist = lax.dynamic_slice(s_pts, [min_distance_idx], [1]).squeeze(0)
     chi_min_dist = lax.dynamic_slice(
         chi_pts, [min_distance_idx, 0], [1, chi_pts.shape[-1]]

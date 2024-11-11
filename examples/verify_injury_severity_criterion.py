@@ -63,7 +63,7 @@ disc_dq_d_fn = jacfwd(injury_severity_criterion_with_contact_geometry_fn, argnum
 def sweep_obstacle_vertically_along_straight_backbone():
     # define the obstacle
     num_points = 250
-    x1_obs_pts = 0.008 * jnp.ones((num_points, ))
+    x1_obs_pts = 2.5e-2 * jnp.ones((num_points, ))
     x2_obs_pts = jnp.linspace(0, 0.1, num_points)
     x_obs_pts = jnp.stack([x1_obs_pts, x2_obs_pts], axis=-1)
     R_obs = jnp.array(0.01)
@@ -117,7 +117,7 @@ def sweep_obstacle_vertically_along_straight_backbone():
 def sweep_obstacle_on_planar_surface_for_straight_backbone():
     # define the obstacle
     x1_obs_grid, x2_obs_grid = jnp.meshgrid(
-        jnp.linspace(-0.015, 0.015, 100), jnp.linspace(-0.02, 0.12, 100)
+        jnp.linspace(-4e-2, 4e-2, 100), jnp.linspace(-0.02, 0.12, 100)
     )
     x_obs_pts = jnp.stack([x1_obs_grid.flatten(), x2_obs_grid.flatten()], axis=-1)
     R_obs = jnp.array(0.01)
@@ -155,7 +155,7 @@ def rotate_obstacle_around_tip_straight_backbone():
     # define the obstacle
     num_points = 1000
     varphi_pts = jnp.linspace(-jnp.pi, jnp.pi, num_points)
-    r = 0.008
+    r = 2.5e-2
     x_obs_pts = jnp.array([0.0, 0.1])[None, :] + r * jnp.stack([
         jnp.cos(varphi_pts), jnp.sin(varphi_pts)
     ], axis=-1)
@@ -195,21 +195,27 @@ def rotate_obstacle_around_tip_straight_backbone():
     plt.savefig(outputs_dir / "rotate_obstacle_around_tip_straight_backbone_details.pdf")
     plt.show()
 
-    # plt.plot(varphi_pts, aux_isc_pts["s_min_dist"], label="s_min_dist")
-    # plt.show()
-    #
-    # plt.plot(varphi_pts, aux_isc_pts["n_c_min_dist"][:, 0], label="n_c(0)")
-    # plt.plot(varphi_pts, aux_isc_pts["n_c_min_dist"][:, 1], label="n_c(1)")
-    # plt.legend()
-    # plt.show()
-    #
-    # # compute the estimated polar angle
-    # varphi_est = jnp.arctan2(aux_isc_pts["n_c_min_dist"][:, 1], aux_isc_pts["n_c_min_dist"][:, 0])
-    # print("varphi_est:", varphi_est)
-    # plt.plot(varphi_pts, varphi_est, linewidth=3.5, label=r"$\hat{\varphi}$")
-    # plt.plot(varphi_pts, varphi_pts, label=r"$\varphi$")
-    # plt.legend()
-    # plt.show()
+    plt.plot(varphi_pts, aux_isc_pts["s_min_dist"], label="s_min_dist")
+    plt.grid(True)
+    plt.xlabel(r"Obstacle polar angle around tip $\varphi$ [rad]")
+    plt.ylabel(r"Backbone coordinate with minimum distance $s_\mathrm{min}$ [m]")
+    plt.show()
+
+    plt.plot(varphi_pts, aux_isc_pts["n_c_min_dist"][:, 0], label=r"$n_\mathrm{c}(0)$")
+    plt.plot(varphi_pts, aux_isc_pts["n_c_min_dist"][:, 1], label=r"$n_\mathrm{c}(1)$")
+    plt.legend()
+    plt.grid(True)
+    plt.xlabel(r"Obstacle polar angle around tip $\varphi$ [rad]")
+    plt.ylabel(r"Collision surface normal $n_\mathrm{c}$")
+    plt.show()
+
+    # compute the estimated polar angle
+    varphi_est = jnp.arctan2(aux_isc_pts["n_c_min_dist"][:, 1], aux_isc_pts["n_c_min_dist"][:, 0])
+    plt.plot(varphi_pts, varphi_est, linewidth=3.5, label=r"$\hat{\varphi}$")
+    plt.plot(varphi_pts, varphi_pts, label=r"$\varphi$")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
 def sweep_configuration_space_static_obstacle():
     # define the configuration space samples
@@ -264,7 +270,7 @@ if __name__ == "__main__":
     tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q_max, jnp.zeros_like(q_max))[3]
 
     # define the obstacle
-    x_obs = jnp.array([0.008, 0.05])
+    x_obs = jnp.array([2e-2, 0.05])
     R_obs = jnp.array(0.01)
 
     # compute the injury severity criterion
