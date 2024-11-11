@@ -41,12 +41,17 @@ def injury_severity_criterion_with_contact_geometry_fn(
         num_backbone_samples=num_backbone_samples
     )
 
+    # compute the penetration depth at the beginning of the collision
+    delta_c0 = jnp.maximum(0.0, -d_min)
+
     # evaluate the injury severity criterion
     isc, aux_isc = isc_callables["injury_severity_criterion_fn"](
-        robot_params, contact_characteristic, q, q_d, s_min_dist, n_c_min_dist, tau_max, apply_actuation_norm=True
+        robot_params, contact_characteristic, q, q_d, s_min_dist, n_c_min_dist, tau_max, delta_c0=delta_c0,
+        apply_actuation_norm=True
     )
 
     aux_isc = aux_isc | dict(
+        delta_c0=delta_c0,
         d_min=d_min,
         s_min_dist=s_min_dist,
         n_c_min_dist=n_c_min_dist,

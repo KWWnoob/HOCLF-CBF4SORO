@@ -233,7 +233,6 @@ def rotate_obstacle_around_tip_straight_backbone():
         img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs_pts[i], R_obs)
         img_pts.append(img)
     img_pts = onp.stack(img_pts, axis=0)
-    print("img_pts.shape:", img_pts.shape)
     animation_ts = onp.linspace(0.0, 30.0, num_points)
     animate_images_cv2(animation_ts, img_pts, outputs_dir / "rotate_obstacle_around_tip_straight_backbone.mp4")
 
@@ -277,7 +276,33 @@ def sweep_configuration_space_static_obstacle():
     plt.savefig(outputs_dir / "sweep_configuration_space_static_obstacle.pdf")
     plt.show()
 
+def sweep_penetration_depth():
+    # define the obstacle
+    x_obs = jnp.array([0.0, 0.25])
+    R_obs = jnp.array(0.1)
 
+    # define the configuration
+    sigma_ax_pts = jnp.linspace(0.0, 2.5, 100)
+    q_pts = jnp.column_stack([jnp.zeros_like(sigma_ax_pts), jnp.zeros_like(sigma_ax_pts), sigma_ax_pts])
+    q_d_pts = jnp.zeros_like(q_pts)
+
+    # define the maximum actuation torque
+    tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q_max, jnp.zeros_like(q_max))[3]
+
+    isc_pts, aux_isc_pts = vmap(
+        injury_severity_criterion_with_contact_geometry_fn, in_axes=(0, 0, None, None, None)
+    )(q_pts, q_d_pts, tau_max, x_obs, R_obs)
+    delta_c0_pts = aux_isc_pts["delta_c0"]
+
+    # plot the injury severity criterion vs. the penetration depth
+    plt.figure(num="Sweep penetration depth: Injury Severity Criterion")
+    plt.plot(delta_c0_pts, isc_pts)
+    plt.xlabel(r"Penetration depth $\delta_\mathrm{c}^0$ [m]")
+    plt.ylabel(r"Injury Severity Criterion [Pa]")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "sweep_penetration_depth.pdf")
+    plt.show()
 
 if __name__ == "__main__":
     # define the configuration
@@ -310,3 +335,4 @@ if __name__ == "__main__":
     sweep_obstacle_on_planar_surface_for_straight_backbone()
     rotate_obstacle_around_tip_straight_backbone()
     sweep_configuration_space_static_obstacle()
+    sweep_penetration_depth()
