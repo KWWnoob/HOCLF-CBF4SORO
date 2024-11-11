@@ -268,8 +268,8 @@ def sweep_configuration_space_static_obstacle():
     plt.contourf(kappa_be_grid, sigma_ax_grid, isc_log_grid, levels=100)
     # # plot the contour lines
     # plt.contour(kappa_be_grid, sigma_ax_grid, isc_log_grid, levels=100, colors="k", linewidths=0.5)
-    plt.xlabel(r"$\kappa_\mathrm{be}$ [rad]")
-    plt.ylabel(r"$\sigma_\mathrm{ax}$ [m]")
+    plt.xlabel(r"Bending strain $\kappa_\mathrm{be}$ [rad]")
+    plt.ylabel(r"Axial strain $\sigma_\mathrm{ax}$ [m]")
     plt.colorbar(label=r"$\log(\mathrm{ISC})$")
     plt.grid()
     plt.tight_layout()
