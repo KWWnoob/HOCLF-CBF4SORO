@@ -33,7 +33,7 @@ robot_params = {
     "l": 1e-1 * jnp.ones((num_segments,)),
     "r": 2e-2 * jnp.ones((num_segments,)),
     "rho": rho,
-    "g": jnp.array([0.0, 9.81]),
+    "g": jnp.array([0.0, 0.0]),
     "E": 2e2 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
     "G": 1e2 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
     "D": D,
@@ -42,6 +42,7 @@ robot_params = {
 contact_characteristic = dict(
     k_H=jnp.array(150 * 1e3),  # N/m the spring constant of the skull and forehead (ISO TS 15066 - 2016)
     A_c=jnp.array(1e-4),  # m^2 = 1 cm^2
+    thick_R_surf = 0.1e-3  # m
 )
 
 # call the factory for the injury severity criterion
@@ -72,14 +73,16 @@ ode_fn = partial(
 def simulate_open_loop_planar_pcs_with_contact():
     # define the initial condition
     q0 = jnp.array([0.0, 0.0, 0.0])
-    q_d0 = jnp.zeros_like(q0)
+    q_d0 = jnp.array([0.0, 0.0, 1e0])
+    # q_d0 = jnp.zeros_like(q0)
     y0 = jnp.concatenate([q0, q_d0])
 
     # define the (constant) generalized torque
-    tau = jnp.array([0.0, 0.0, 1e-2])
+    tau = jnp.array([0.0, 0.0, 1e-1])
+    # tau = jnp.zeros_like(q0)
 
     # define the obstacle position and radius
-    x_obs = jnp.array([0.00, 0.15])
+    x_obs = jnp.array([0.0, 0.15])
     R_obs = jnp.array(0.01)
 
     # define the sampling and simulation time step
@@ -91,10 +94,6 @@ def simulate_open_loop_planar_pcs_with_contact():
 
     # define the local ode fn
     local_ode_fn = partial(ode_fn, x_obs=x_obs, R_obs=R_obs)
-
-    # test ode_fn
-    y_d = local_ode_fn(0.0, y0, tau)
-    print(f"y_d = {y_d}")
 
     # setup the diffrax ode term
     ode_term = dx.ODETerm(local_ode_fn)
@@ -143,6 +142,19 @@ def simulate_open_loop_planar_pcs_with_contact():
     ax.grid(True)
     plt.tight_layout()
     plt.savefig(outputs_dir / "planar_pcs_with_contact_open_loop_simulation_contact_force.pdf")
+    plt.show()
+
+    # plot the contact torque
+    fig, ax = plt.subplots(num="Soft robot open-loop simulation: Contact torque")
+    ax.plot(ts, tau_c_ts[:, 0], label=r"$\tau_\mathrm{c,be}$ [Nm]")
+    ax.plot(ts, tau_c_ts[:, 1], label=r"$\tau_\mathrm{c,sh}$ [N]")
+    ax.plot(ts, tau_c_ts[:, 2], label=r"$\tau_\mathrm{c,ax}$ [N]")
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Contact torque [Nm]")
+    ax.legend()
+    ax.grid(True)
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "planar_pcs_with_contact_open_loop_simulation_contact_torque.pdf")
     plt.show()
 
     # animate the motion
