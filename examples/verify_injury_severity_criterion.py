@@ -125,6 +125,14 @@ def sweep_obstacle_vertically_along_straight_backbone():
     plt.savefig(outputs_dir / "vertical_obstacle_position_sweep_straight_backbone_derivative.pdf")
     plt.show()
 
+    img_pts = []
+    for i, x2_obs in enumerate(x2_obs_pts):
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs_pts[i], R_obs)
+        img_pts.append(img)
+    img_pts = onp.stack(img_pts, axis=0)
+    animation_ts = onp.linspace(0.0, 30.0, num_points)
+    animate_images_cv2(animation_ts, img_pts, outputs_dir / "vertical_obstacle_position_sweep_straight_backbone.mp4")
+
 def sweep_obstacle_on_planar_surface_for_straight_backbone():
     # define the obstacle
     x1_obs_grid, x2_obs_grid = jnp.meshgrid(
