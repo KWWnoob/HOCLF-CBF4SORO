@@ -290,7 +290,7 @@ def sweep_penetration_depth():
     R_obs = jnp.array(0.1)
 
     # define the configuration
-    sigma_ax_pts = jnp.linspace(0.0, 2.5, 100)
+    sigma_ax_pts = jnp.linspace(0.0, 1.3, 100)
     q_pts = jnp.column_stack([jnp.zeros_like(sigma_ax_pts), jnp.zeros_like(sigma_ax_pts), sigma_ax_pts])
     q_d_pts = jnp.zeros_like(q_pts)
 
@@ -302,6 +302,16 @@ def sweep_penetration_depth():
     )(q_pts, q_d_pts, tau_max, x_obs, R_obs)
     delta_c0_pts = aux_isc_pts["delta_c0"]
 
+    # plot the injury severity criterion vs. the axial strain
+    plt.figure(num="Sweep penetration depth: Injury Severity Criterion")
+    plt.plot(sigma_ax_pts, isc_pts)
+    plt.xlabel(r"Axial strain $\sigma_\mathrm{ax}$ []")
+    plt.ylabel(r"Injury Severity Criterion [Pa]")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "sweep_penetration_depth_axial_strain.pdf")
+    plt.show()
+
     # plot the injury severity criterion vs. the penetration depth
     plt.figure(num="Sweep penetration depth: Injury Severity Criterion")
     plt.plot(delta_c0_pts, isc_pts)
@@ -311,6 +321,22 @@ def sweep_penetration_depth():
     plt.tight_layout()
     plt.savefig(outputs_dir / "sweep_penetration_depth.pdf")
     plt.show()
+
+    # evaluate disc_dq_fn on the points
+    disc_dq_pts, _ = vmap(
+        disc_dq_fn, in_axes=(0, 0, None, None, None)
+    )(q_pts, q_d_pts, tau_max, x_obs, R_obs)
+
+    # plot the derivative of the injury severity criterion w.r.t. the axial strain
+    plt.figure(num="Sweep penetration depth: ISC Derivative w.r.t. axial strain")
+    plt.plot(sigma_ax_pts, disc_dq_pts[:, 2])
+    plt.xlabel(r"Axial strain $\sigma_\mathrm{ax}$ []")
+    plt.ylabel(r"$\frac{\partial \mathrm{ISC}}{\partial \sigma_\mathrm{ax}}$ [Pa]")
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(outputs_dir / "sweep_penetration_depth_derivative_axial_strain.pdf")
+    plt.show()
+
 
 if __name__ == "__main__":
     # define the configuration
