@@ -165,12 +165,12 @@ def sweep_obstacle_on_planar_surface_for_straight_backbone():
 
     # plot the injury severity criterion as contour plot
     plt.figure(num="Sweep obstacle on planar surface for straight backbone: Injury Severity Criterion")
-    plt.contourf(x1_obs_grid, x2_obs_grid, isc_log_grid, levels=100)
+    plt.contourf(x1_obs_grid, x2_obs_grid, isc_grid, levels=100)
     # # plot the contour lines
     # plt.contour(x1_obs_grid, x2_obs_grid, isc_log_grid, levels=100, colors="k", linewidths=0.5)
     plt.xlabel(r"$x_\mathrm{obs}$ [m]")
     plt.ylabel(r"$y_\mathrm{obs}$ [m]")
-    plt.colorbar(label=r"$\log(\mathrm{ISC})$")
+    plt.colorbar(label=r"$\mathrm{ISC}$ [Pa]")
     plt.grid()
     plt.tight_layout()
     plt.savefig(outputs_dir / "obstacle_on_planar_surface_sweep_straight_backbone.pdf")
@@ -280,12 +280,12 @@ def sweep_configuration_space_static_obstacle():
 
     # plot the injury severity criterion as contour plot
     plt.figure(num="Sweep configuration space for static obstacle: Injury Severity Criterion")
-    plt.contourf(kappa_be_grid, sigma_ax_grid, isc_log_grid, levels=100)
+    plt.contourf(kappa_be_grid, sigma_ax_grid, isc_grid, levels=100)
     # # plot the contour lines
     # plt.contour(kappa_be_grid, sigma_ax_grid, isc_log_grid, levels=100, colors="k", linewidths=0.5)
     plt.xlabel(r"Bending strain $\kappa_\mathrm{be}$ [rad]")
     plt.ylabel(r"Axial strain $\sigma_\mathrm{ax}$ [m]")
-    plt.colorbar(label=r"$\log(\mathrm{ISC})$")
+    plt.colorbar(label=r"$\mathrm{ISC}$ [Pa]")
     plt.grid()
     plt.tight_layout()
     plt.savefig(outputs_dir / "sweep_configuration_space_static_obstacle.pdf")
