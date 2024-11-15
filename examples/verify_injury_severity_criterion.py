@@ -52,11 +52,18 @@ contact_characteristic = dict(
 q_min = jnp.array([-jnp.pi, -0.2, -0.2])
 q_max = jnp.array([jnp.pi, 0.2, 0.2])
 
+# define the compression factor for the contact boundary
+contact_boundary_compression_factor = 2e3
+
 # call the factory for the injury severity criterion
 isc_callables = planar_pcs_injury_severity_criterion_factory(num_segments=num_segments)
 injury_severity_criterion_with_contact_geometry_fn = partial(
-    injury_severity_criterion_with_contact_geometry, isc_callables, robot_params, contact_characteristic,
-    num_backbone_samples=500
+    injury_severity_criterion_with_contact_geometry,
+    isc_callables,
+    robot_params,
+    contact_characteristic,
+    num_backbone_samples=500,
+    contact_boundary_compression_factor=contact_boundary_compression_factor,
 )
 
 # jacobian function of the injury severity criterion w.r.t. the configuration
@@ -290,7 +297,7 @@ def sweep_penetration_depth():
     R_obs = jnp.array(0.1)
 
     # define the configuration
-    sigma_ax_pts = jnp.linspace(0.0, 1.3, 100)
+    sigma_ax_pts = jnp.linspace(0.0, 1.3, 1000)
     q_pts = jnp.column_stack([jnp.zeros_like(sigma_ax_pts), jnp.zeros_like(sigma_ax_pts), sigma_ax_pts])
     q_d_pts = jnp.zeros_like(q_pts)
 
@@ -298,7 +305,8 @@ def sweep_penetration_depth():
     tau_max = isc_callables["dynamical_matrices_fn"](robot_params, q_max, jnp.zeros_like(q_max))[3]
 
     isc_pts, aux_isc_pts = vmap(
-        injury_severity_criterion_with_contact_geometry_fn, in_axes=(0, 0, None, None, None)
+        injury_severity_criterion_with_contact_geometry_fn,
+        in_axes=(0, 0, None, None, None),
     )(q_pts, q_d_pts, tau_max, x_obs, R_obs)
     delta_c0_pts = aux_isc_pts["delta_c0"]
 

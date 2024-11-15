@@ -3,7 +3,7 @@ from functools import partial
 import jax
 from jax import Array, jacfwd, jit, lax, vmap
 from jax import numpy as jnp
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 from .planar_contact_geometry import compute_planar_contact_geometry
 
@@ -18,6 +18,8 @@ def injury_severity_criterion_with_contact_geometry_fn(
     x_obs: Array,
     R_obs: Array,
     num_backbone_samples: int = 250,
+    contact_boundary_fn: Optional[Callable] = jax.nn.sigmoid,
+    contact_boundary_compression_factor: float = 2e3,
 ):
     """
     Compute the injury severity criterion by considering contact geometry.
@@ -31,6 +33,10 @@ def injury_severity_criterion_with_contact_geometry_fn(
         x_obs: position of the obstacle
         R_obs: radius of the obstacle
         num_backbone_samples: number of points to discretize the backbone
+        contact_boundary_fn: function to compute the collision boundary.
+            If None, use a hard boundary (i.e., discontinuous). The boundary function should be in the range [0, 1].
+        contact_boundary_compression_factor: compression factor for the contact boundary function.
+            The robot-obstacle distance is multiplied by this factor before applying the boundary function.
     Returns:
         isc: injury severity criterion
         aux_isc: auxiliary variables
@@ -59,6 +65,9 @@ def injury_severity_criterion_with_contact_geometry_fn(
         n_c=n_c,
     )
 
-    isc = lax.select(d_min <= 0.0, isc, jnp.zeros_like(isc))
+    if contact_boundary_fn is None:
+        isc = lax.select(-d_min >= 0.0, isc, jnp.zeros_like(isc))
+    else:
+        isc = contact_boundary_fn(-d_min * contact_boundary_compression_factor) * isc
 
     return isc, aux_isc
