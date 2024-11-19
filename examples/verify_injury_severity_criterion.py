@@ -40,8 +40,8 @@ robot_params = {
     "E": 2e3 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
     "G": 1e3 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
 }
-# Damping coefficient
-robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3])) * robot_params["l"]
+# damping matrix
+robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3]) * robot_params["l"])
 # define the contact characteristic
 contact_characteristic = dict(
     k_H=jnp.array(150 * 1e3),  # N/m the spring constant of the skull and forehead (ISO TS 15066 - 2016)

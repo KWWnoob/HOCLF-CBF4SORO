@@ -36,8 +36,8 @@ robot_params = {
     "E": 2e3 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
     "G": 1e3 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
 }
-# Damping coefficient
-robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3])) * robot_params["l"]
+# damping matrix
+robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3]) * robot_params["l"])
 
 # activate all strains (i.e. bending, shear, and axial)
 strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
