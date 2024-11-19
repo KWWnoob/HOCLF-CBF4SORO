@@ -359,10 +359,11 @@ if __name__ == "__main__":
     # define the obstacle
     x_obs = jnp.array([2e-2, 0.05])
     R_obs = jnp.array(0.01)
+    v_obs = jnp.array([-1e0, 0.0])
 
     # compute the injury severity criterion
     isc, aux_isc = injury_severity_criterion_with_contact_geometry_fn(
-        q, q_d, tau_max, x_obs, R_obs
+        q, q_d, tau_max, x_obs, R_obs, v_obs=v_obs
     )
     print("Injury severity criterion:", isc, "\n", aux_isc)
 
@@ -370,7 +371,7 @@ if __name__ == "__main__":
     disc_dq, _ = disc_dq_fn(q, q_d, tau_max, x_obs, R_obs)
     print("disc_dq:\n", disc_dq)
     # jacobian of the injury severity criterion w.r.t. the configuration velocity
-    disc_dq_d, _ = disc_dq_d_fn(q, q_d, tau_max, x_obs, R_obs)
+    disc_dq_d, _ = disc_dq_d_fn(q, q_d, tau_max, x_obs, R_obs, v_obs=v_obs)
     print("disc_dq_d:\n", disc_dq_d)
 
     sweep_obstacle_vertically_along_straight_backbone()

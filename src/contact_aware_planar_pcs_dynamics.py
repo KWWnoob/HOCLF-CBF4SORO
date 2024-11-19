@@ -29,7 +29,7 @@ def contact_torque_fn(
         contact_characteristic: Dictionary with contact characteristics
         q: generalized coordinates
         q_d: generalized velocities
-        x_obs: position of the obstacle
+        x_obs: position of the obstacle as array of shape (2,)
         R_obs: radius of the obstacle
         num_backbone_samples: number of points to discretize the backbone
     Returns:
@@ -37,7 +37,7 @@ def contact_torque_fn(
         aux: dictionary with auxiliary information
     """
     # evaluate the contact geometry
-    d_min, s_min_dist, n_c_min_dist, aux_contact_geometry = compute_planar_contact_geometry(
+    d_min, s_c, n_c, aux_contact_geometry = compute_planar_contact_geometry(
         forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs, R_obs,
         num_backbone_samples=num_backbone_samples
     )
@@ -52,7 +52,7 @@ def contact_torque_fn(
     f_c = k_c * delta_c
 
     # compute the Jacobian of the contact point
-    J_c = n_c_min_dist[None, :] @ auxiliary_fns["jacobian_fn"](robot_params, q, s_min_dist)[:2]
+    J_c = n_c[None, :] @ auxiliary_fns["jacobian_fn"](robot_params, q, s_c)[:2]
 
     # compute the contact torque
     tau_c = lax.select(
@@ -64,8 +64,8 @@ def contact_torque_fn(
     aux = dict(
         f_c=f_c,
         d_min=d_min,
-        s_c=s_min_dist,
-        n_c=n_c_min_dist,
+        s_c=s_c,
+        n_c=n_c,
         J_c=J_c,
     )
 
