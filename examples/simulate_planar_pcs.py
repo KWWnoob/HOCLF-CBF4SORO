@@ -27,17 +27,17 @@ sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"plana
 
 # set soft robot parameters
 rho = 1070 * jnp.ones((num_segments,))  # Volumetric density of Dragon Skin 20 [kg/m^3]
-D = 5e-6 * jnp.diag(jnp.array([1e0, 1e3, 1e3]))  # Damping coefficient
 robot_params = {
     "th0": jnp.array(0.0),  # initial orientation angle [rad]
     "l": 1e-1 * jnp.ones((num_segments,)),
     "r": 2e-2 * jnp.ones((num_segments,)),
     "rho": rho,
     "g": jnp.array([0.0, 9.81]),
-    "E": 2e2 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
-    "G": 1e2 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
-    "D": D,
+    "E": 2e3 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
+    "G": 1e3 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
 }
+# Damping coefficient
+robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3])) * robot_params["l"]
 
 # activate all strains (i.e. bending, shear, and axial)
 strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
