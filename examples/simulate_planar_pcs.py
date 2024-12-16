@@ -4,7 +4,7 @@ import jax
 
 jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
-from jax import Array, jacfwd, jit, vmap
+from jax import Array, debug, jacfwd, jit, vmap
 from jax import numpy as jnp
 import jsrm
 from jsrm.systems import planar_pcs
@@ -44,6 +44,8 @@ strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
 # call the factory function for the planar PCS
 strain_basis, forward_kinematics_fn, dynamical_matrices_fn, auxiliary_fns = planar_pcs.factory(sym_exp_filepath, strain_selector)
+kinetic_energy_fn = jit(auxiliary_fns["kinetic_energy_fn"])
+potential_energy_fn = jit(auxiliary_fns["potential_energy_fn"])
 
 # construct batched forward kinematics function
 batched_forward_kinematics_fn = vmap(
@@ -226,7 +228,69 @@ def regulation_objective_example():
     cost = cost_fn(q, q_des)
     print(f"Cost for q = {q} and q_des = {q_des} is {cost}")
 
+def control_lyapunov_function_example():
+    def control_lyapunov_fn(params: Dict[str, Array], q: Array, q_d: Array, q_des: Array) -> Array:
+        """
+        Control Lyapunov Function for a setpoint regulator of form 
+            tau = K(q_des) + G(q_des)
+        The Control Lyapunov Function is given in Eq. (19) of the paper
+            Della Santina, C., Duriez, C., & Rus, D. (2023). Model-based control of soft robots: 
+            A survey of the state of the art and open challenges. IEEE Control Systems Magazine, 43(3), 30-65.
+        Args:
+            params: robot parameters
+            q: configuration
+            q_d: configuration velocity
+            q_des: desired configuration
+        Returns:
+            V: value of the control Lyapunov function
+        """
+        # compute the kinetic energy at the current configuration
+        T = kinetic_energy_fn(robot_params, q, q_d)
+        # compute the potential energy at the current configuration
+        U = potential_energy_fn(robot_params, q)
+        # compute the potential energy at the desired configuration
+        U_des = potential_energy_fn(robot_params, q_des)
+        # compute the dynamical matrices at the desired configuration
+        B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(params, q_des, jnp.zeros_like(q_des))
+
+        # compute the control Lyapunov function
+        V = T + U - U_des + (G_des + K_des).T @ (q_des - q)
+
+        return V
+
+    # define the desired configuration
+    q_des = jnp.array([1.0, 0.0, -0.05])
+    # set the configuration velocity to zero
+    q_d = jnp.zeros_like(q_des)
+
+    # define a grid of configurations
+    kappa_be_grid, sigma_ax_grid = jnp.meshgrid(jnp.linspace(-jnp.pi, jnp.pi, 200), jnp.linspace(-0.1, 0.1, 200))
+
+    # compute the control Lyapunov function on the grid
+    kappa_be_pts, sigma_ax_pts = kappa_be_grid.flatten(), sigma_ax_grid.flatten()
+    q_pts = jnp.column_stack([kappa_be_pts, jnp.zeros_like(kappa_be_pts), sigma_ax_pts])
+    V_pts = vmap(
+        control_lyapunov_fn, 
+        in_axes=(None, 0, None, None)
+    )(robot_params, q_pts, q_d, q_des)
+
+    # reshape the results
+    V_grid = V_pts.reshape(kappa_be_grid.shape)
+
+    # plot the control Lyapunov function
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10), num="Control Lyapunov function")
+    cs = ax.contourf(kappa_be_grid, sigma_ax_grid, V_grid, levels=100)
+    fig.colorbar(cs, ax=ax, label="Control Lyapunov Function")
+    # plot the contour lines
+    ax.contour(kappa_be_grid, sigma_ax_grid, V_grid, levels=20, colors="black", alpha=0.5)
+    ax.set_xlabel(r"Bending strain $\kappa_\mathrm{be}$")
+    ax.set_ylabel(r"Axial strain $\sigma_\mathrm{ax}$")
+    ax.grid(True)
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
     soft_robot_ode_example()
     soft_robot_regulation_example()
     regulation_objective_example()
+    control_lyapunov_function_example()
