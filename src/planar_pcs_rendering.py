@@ -53,6 +53,7 @@ def draw_image(
         [w // 2, 0.1 * h], dtype=onp.int32
     )  # in x-y pixel coordinates
 
+
     # draw base
     cv2.rectangle(img, (0, h - curve_origin[1]), (w, h), color=base_color, thickness=-1)
     # transform robot poses to pixel coordinates
@@ -78,5 +79,4 @@ def draw_image(
     # invert the v pixel coordinate
     uv_obs[1] = h - uv_obs[1]
     cv2.circle(img, tuple(uv_obs), int(R_obs * ppm), (0, 255, 0), thickness=-1)
-
     return img
