@@ -597,9 +597,9 @@ def soft_robot_with_safety_contact_example():
             self.robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3]) * self.robot_params["l"])
             self.strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
-            self.obstacle_pos = jnp.array([-0.02, 0.9])
-            self.obstacle_radius = 0.002
-            self.s_ps = jnp.linspace(0, self.robot_params["l"], 20)
+            self.obstacle_pos = jnp.array([-5e-2, 0.09])
+            self.obstacle_radius = 1e-2
+            self.s_ps = jnp.linspace(0, self.robot_params["l"], 10)
 
             super().__init__(
                 n=6, # number of states
@@ -608,7 +608,7 @@ def soft_robot_with_safety_contact_example():
                 # parameter already, balancing the CLF and CBF constraints.
                 relax_cbf=True,
                 # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
-                cbf_relaxation_penalty=1e4,
+                cbf_relaxation_penalty=1e6,
             )
     
         def f(self, z) -> Array:
@@ -633,27 +633,35 @@ def soft_robot_with_safety_contact_example():
             zero_block = jnp.zeros((q.shape[0], control_matrix.shape[1]))
             
             return jnp.concatenate([zero_block, control_matrix], axis=0)
-        
+
         def h_2(self, z):
+            # regulating "pose space"
+
             # Split input into positions (q) and velocities (q_d)
             q, q_d = jnp.split(z, 2)
 
             # Compute positions of all robotic segments
             pos = forward_kinematics_fn(self.robot_params, q, self.s_ps)  
-
             # Ignore orientation, keep x-y positions
-            pos = pos[:2, :] 
+            pos = pos[:2, -1] 
 
             # Compute the distance to the obstacle center
-            distance_to_obstacle = jnp.linalg.norm((pos.T - self.obstacle_pos)**2, axis=1) 
+            distance_to_obstacle = jnp.linalg.norm((pos.T - self.obstacle_pos), ord=2, axis=0) 
+
             # Compute safety margin for each segment
-            safety_margins = distance_to_obstacle- self.obstacle_radius ** 2 - (2e-2) **2 
+            safety_margins = distance_to_obstacle - (self.obstacle_radius + (2e-2)) # minimal distance
+            return jnp.array([safety_margins])
+            # return jnp.array([1])
+
+        # def h_1(self, z):
+        #     #regulating "strain space"
+        #     q, q_d = jnp.split(z, 2)
+        #     pos_max = jnp.array([jnp.pi * 4, 0.1, 0.3])
+
+            return jnp.concatenate([pos_max - q])
         
-            # Barrier function is the minimum safety margin across all segments
-            h2 = jnp.min(safety_margins)
-
-            return jnp.array([h2])
-
+        def alpha(self, h):
+            return 0.00001*h
         
     def control_policy_fn(t: float, y: Array, q_des: Array) -> Array:
         """
@@ -669,9 +677,10 @@ def soft_robot_with_safety_contact_example():
         B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
 
         # the torque is equal to the potential forces at the desired configuration
-        tau = G_des + K_des
+        tau = G_des + K_des 
 
         return tau
+    
     
     config = SoRoConfig()
     cbf = CBF.from_config(config)
@@ -700,12 +709,13 @@ def soft_robot_with_safety_contact_example():
 
     # define the initial condition
     q0 = jnp.array([jnp.pi, 0.01, 0.05])
+    print("p0:",forward_kinematics_fn(robot_params, q0, jnp.linspace(0, robot_params["l"], 10)))
     q_d0 = jnp.zeros_like(q0)
     y0 = jnp.concatenate([q0, q_d0])
 
     # define the desired configuration
     q_des = jnp.array([jnp.pi * 3, 0.0, 0.2])
-
+    print("pdes:",forward_kinematics_fn(robot_params, q_des, jnp.linspace(0, robot_params["l"], 10)))
     # define the sampling and simulation time step
     dt = 1e-3
     sim_dt = 5e-5
@@ -764,7 +774,7 @@ def soft_robot_with_safety_contact_example():
     # Animate the motion and collect chi_ps
     img_ts = []
     for q in q_ts[::20]:
-        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs = jnp.array([-0.02, 0.9]), R_obs= 0.2)
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs = jnp.array([-0.02, 0.9]), R_obs= 0.002)
         img_ts.append(img)
         
         chi_ps = batched_forward_kinematics_fn(robot_params, q, s_ps)
