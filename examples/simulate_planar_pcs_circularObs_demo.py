@@ -30,6 +30,8 @@ sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"plana
 
 # set soft robot parameters
 rho = 1070 * jnp.ones((num_segments,))  # Volumetric density of Dragon Skin 20 [kg/m^3]
+length = 1e-1
+radius = 2e-2
 robot_params = {
     "th0": jnp.array(0.0),  # initial orientation angle [rad]
     "l": 1e-1 * jnp.ones((num_segments,)),
@@ -66,7 +68,7 @@ def soft_robot_with_safety_contact_example():
 
             self.strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
-            self.obstacle_pos = jnp.array([-5e-2, 0.09])
+            self.obstacle_pos = jnp.array([-8e-2, 0.09])
             self.obstacle_radius = 1e-2
             self.s_ps = jnp.linspace(0, self.robot_params["l"], 20)
 
@@ -112,26 +114,21 @@ def soft_robot_with_safety_contact_example():
             # Compute positions of all robotic segments
             pos = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)  
             # Ignore orientation, keep x-y positions
-            pos = pos[-1,:2]
+            pos = pos[:,:2]
 
             # Compute the distance to the obstacle center
-            distance_to_obstacle = jnp.linalg.norm((pos - self.obstacle_pos), ord=2) 
-
+            distance_to_obstacle = jnp.linalg.norm((pos - self.obstacle_pos), ord=2,axis = 1) 
             # Compute safety margin for each segment
             safety_margins = distance_to_obstacle - (self.obstacle_radius) # minimal distance
-            safety_margins = safety_margins[None, ...]
-            return safety_margins
+
+            # jax.debug.print("Safety Margins: {}", safety_margins)
+            # safety_margins = min(safety_margins)
+            return safety_margins/(length) #normalize
             # return jnp.array([1])
 
-        # def h_1(self, z):
-        #     #regulating "strain space"
-        #     q, q_d = jnp.split(z, 2)
-        #     pos_max = jnp.array([jnp.pi * 4, 0.1, 0.3])
-
-        # return jnp.concatenate([pos_max - q])
         
         def alpha(self, h):
-            return h
+            return 0.5 * h
         
     def control_policy_fn(t: float, y: Array, q_des: Array) -> Array:
         """
@@ -150,7 +147,6 @@ def soft_robot_with_safety_contact_example():
         tau = G_des + K_des 
 
         return tau
-    
     
     config = SoRoConfig()
     cbf = CBF.from_config(config)
@@ -176,7 +172,6 @@ def soft_robot_with_safety_contact_example():
 
         return y_d
 
-
     # define the initial condition
     q0 = jnp.array([jnp.pi, 0.01, 0.05])
 
@@ -201,7 +196,6 @@ def soft_robot_with_safety_contact_example():
 
     # extract the results
     q_ts, q_d_ts = jnp.split(sol.ys, 2, axis=1)
-
 
     q_des_ts = jnp.tile(q_des, (len(ts), 1))
     # Compute tau_ts using vmap
