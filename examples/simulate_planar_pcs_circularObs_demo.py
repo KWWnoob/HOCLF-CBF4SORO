@@ -113,18 +113,18 @@ def soft_robot_with_safety_contact_example():
             q, q_d = jnp.split(z, 2)
 
             # Compute positions of all robotic segments
-            pos = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
+            chi_ps = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
             # Ignore orientation, keep x-y positions
-            pos = pos[:,:2]
+            p_ps = chi_ps[:,:2]
 
             # Compute the distance to the obstacle center
-            distance_to_obstacle = jnp.linalg.norm((pos - self.obstacle_pos), ord=2,axis = 1)
+            d2o_ps = jnp.linalg.norm((p_ps - self.obstacle_pos), ord=2, axis=1)
             # Compute safety margin for each segment
-            safety_margins = distance_to_obstacle - (self.obstacle_radius) # minimal distance
+            safety_margins = d2o_ps - self.obstacle_radius # minimal distance
 
             # jax.debug.print("Safety Margins: {}", safety_margins)
             # safety_margins = min(safety_margins)
-            return safety_margins/(robot_length) #normalize
+            return safety_margins / (robot_length) #normalize
             # return jnp.array([1])
 
 
@@ -160,8 +160,8 @@ def soft_robot_with_safety_contact_example():
         tau = control_policy_fn(t, y, q_des)
 
         # evaluate the safe control polic
-        # tau_filtered = cbf.safety_filter(y, tau)
-        tau_filtered = tau
+        tau_filtered = cbf.safety_filter(y, tau)
+        # tau_filtered = tau
 
         # compute the dynamical matrices
         B, C, G, K, D, alpha = dynamical_matrices_fn(robot_params, q, q_d)
