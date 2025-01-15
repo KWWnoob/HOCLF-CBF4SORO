@@ -1,3 +1,4 @@
+import csv
 import diffrax as dx
 from functools import partial
 import jax
@@ -30,12 +31,12 @@ sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"plana
 
 # set soft robot parameters
 rho = 1070 * jnp.ones((num_segments,))  # Volumetric density of Dragon Skin 20 [kg/m^3]
-length = 1e-1
-radius = 2e-2
+robot_length = 1e-1
+robot_radius = 2e-2
 robot_params = {
     "th0": jnp.array(0.0),  # initial orientation angle [rad]
-    "l": 1e-1 * jnp.ones((num_segments,)),
-    "r": 2e-2 * jnp.ones((num_segments,)),
+    "l": robot_length * jnp.ones((num_segments,)),
+    "r": robot_radius * jnp.ones((num_segments,)),
     "rho": rho,
     "g": jnp.array([0.0, 9.81]),
     "E": 2e3 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
@@ -81,28 +82,28 @@ def soft_robot_with_safety_contact_example():
                 # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
                 cbf_relaxation_penalty=1e6,
             )
-    
+
         def f(self, z) -> Array:
             q, q_d = jnp.split(z, 2)  # Split state z into q (position) and q_d (velocity)
             B, C, G, K, D, alpha = dynamical_matrices_fn(self.robot_params, q, q_d)
-            
+
             # Drift term (f(x))
             drift = (
                 -jnp.linalg.inv(B) @ (C @ q_d + D @ q_d + G + K)
             )
-    
+
             return jnp.concatenate([q_d, drift])
-        
+
         def g(self, z) -> Array:
             q, q_d = jnp.split(z, 2)
             B, _, _, _, _, _ = dynamical_matrices_fn(self.robot_params, q, q_d)
-            
+
             # Control matrix g(x)
             control_matrix = jnp.linalg.inv(B)
-            
+
             # Match dimensions for concatenation
             zero_block = jnp.zeros((q.shape[0], control_matrix.shape[1]))
-            
+
             return jnp.concatenate([zero_block, control_matrix], axis=0)
 
         def h_2(self, z):
@@ -112,24 +113,24 @@ def soft_robot_with_safety_contact_example():
             q, q_d = jnp.split(z, 2)
 
             # Compute positions of all robotic segments
-            pos = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)  
+            pos = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
             # Ignore orientation, keep x-y positions
             pos = pos[:,:2]
 
             # Compute the distance to the obstacle center
-            distance_to_obstacle = jnp.linalg.norm((pos - self.obstacle_pos), ord=2,axis = 1) 
+            distance_to_obstacle = jnp.linalg.norm((pos - self.obstacle_pos), ord=2,axis = 1)
             # Compute safety margin for each segment
             safety_margins = distance_to_obstacle - (self.obstacle_radius) # minimal distance
 
             # jax.debug.print("Safety Margins: {}", safety_margins)
             # safety_margins = min(safety_margins)
-            return safety_margins/(length) #normalize
+            return safety_margins/(robot_length) #normalize
             # return jnp.array([1])
 
-        
+
         def alpha(self, h):
             return 0.5 * h
-        
+
     def control_policy_fn(t: float, y: Array, q_des: Array) -> Array:
         """
         Control policy that regulates the configuration to a desired configuration q_des.
@@ -144,10 +145,10 @@ def soft_robot_with_safety_contact_example():
         B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
 
         # the torque is equal to the potential forces at the desired configuration
-        tau = G_des + K_des 
+        tau = G_des + K_des
 
         return tau
-    
+
     config = SoRoConfig()
     cbf = CBF.from_config(config)
 
@@ -159,7 +160,8 @@ def soft_robot_with_safety_contact_example():
         tau = control_policy_fn(t, y, q_des)
 
         # evaluate the safe control polic
-        tau_filtered = cbf.safety_filter(y, tau)
+        # tau_filtered = cbf.safety_filter(y, tau)
+        tau_filtered = tau
 
         # compute the dynamical matrices
         B, C, G, K, D, alpha = dynamical_matrices_fn(robot_params, q, q_d)
@@ -197,7 +199,7 @@ def soft_robot_with_safety_contact_example():
     # extract the results
     q_ts, q_d_ts = jnp.split(sol.ys, 2, axis=1)
 
-    q_des_ts = jnp.tile(q_des, (len(ts), 1))
+    q_des_ts = jnp.tile(q_des, (ts.shape[0], 1))
     # Compute tau_ts using vmap
     tau_ts = vmap(closed_loop_ode_fn)(ts, sol.ys, q_des_ts)
 
@@ -205,9 +207,18 @@ def soft_robot_with_safety_contact_example():
     fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True, num="Regulation example")
 
     # Plot strains
-    axes[0].plot(ts, q_ts[:, 0], label=r"$\kappa_\mathrm{be}$")
-    axes[1].plot(ts, q_ts[:, 1], label=r"$\sigma_\mathrm{sh}$")
-    axes[2].plot(ts, q_ts[:, 2], label=r"$\sigma_\mathrm{ax}$")
+    # plot the reference strain evolution
+    axes[0].plot(ts, q_des_ts[:, 0], linewidth=3.0, linestyle=":", label=r"$\kappa_\mathrm{be}^\mathrm{d}$")
+    axes[1].plot(ts, q_des_ts[:, 1], linewidth=3.0, linestyle=":", label=r"$\sigma_\mathrm{sh}^\mathrm{d}$")
+    axes[2].plot(ts, q_des_ts[:, 2], linewidth=3.0, linestyle=":", label=r"$\sigma_\mathrm{ax}^\mathrm{d}$")
+    # reset the color cycle
+    axes[0].set_prop_cycle(None)
+    axes[1].set_prop_cycle(None)
+    axes[2].set_prop_cycle(None)
+    # plot the actual strain evolution
+    axes[0].plot(ts, q_ts[:, 0], linewidth=2.0, label=r"$\kappa_\mathrm{be}$")
+    axes[1].plot(ts, q_ts[:, 1], linewidth=2.0, label=r"$\sigma_\mathrm{sh}$")
+    axes[2].plot(ts, q_ts[:, 2], linewidth=2.0, label=r"$\sigma_\mathrm{ax}$")
 
     # Plot control inputs tau_ts
     for i in range(tau_ts.shape[1]):  # Assuming tau_ts has multiple dimensions (e.g., torques for each actuator)
@@ -228,8 +239,6 @@ def soft_robot_with_safety_contact_example():
     plt.tight_layout()
     plt.show()
 
-    import csv
-
     # Collect chi_ps values
     chi_ps_list = []
 
@@ -240,13 +249,13 @@ def soft_robot_with_safety_contact_example():
     for q in q_ts[::20]:
         img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius)
         img_ts.append(img)
-        
+
         chi_ps = batched_forward_kinematics_fn(robot_params, q, s_ps)
         # Store chi_ps as a list for each timestep
         chi_ps_list.append(onp.array(chi_ps))  # Convert to numpy array for easier handling
 
     # Save chi_ps to a CSV using the csv module
-    with open("chi_ps_values.csv", mode="w", newline="") as file:
+    with open(outputs_dir / "chi_ps_values.csv", mode="w", newline="") as file:
         writer = csv.writer(file)
         # Write header (optional, depending on chi_ps dimensions)
         writer.writerow([f"Chi_{i}_{j}" for i in range(chi_ps.shape[0]) for j in range(chi_ps.shape[1])])
