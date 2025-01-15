@@ -774,7 +774,7 @@ def soft_robot_with_safety_contact_example():
     # Animate the motion and collect chi_ps
     img_ts = []
     for q in q_ts[::20]:
-        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs = jnp.array([-0.02, 0.9]), R_obs= 0.002)
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs = jnp.array([-0.002, 0.09]), R_obs= 0.002)
         img_ts.append(img)
         
         chi_ps = batched_forward_kinematics_fn(robot_params, q, s_ps)
