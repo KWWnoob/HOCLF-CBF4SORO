@@ -4,7 +4,6 @@ from functools import partial
 import jax
 from cbfpy import CBF, CBFConfig
 from cbfpy.cbfs.clf_cbf import CLFCBF
-from cbfpy.config.clf_cbf_config import CLFCBFConfig
 
 jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
@@ -71,16 +70,18 @@ def soft_robot_with_safety_contact_example():
 
             self.obstacle_pos = jnp.array([-8e-2, 0.09])
             self.obstacle_radius = 1e-2
-            self.s_ps = jnp.linspace(0, self.robot_params["l"], 20)
+            self.s_ps = jnp.linspace(0, robot_length, 20)
+
+            self.safety_margin_norm_factor = 1
 
             super().__init__(
                 n=6, # number of states
                 m=3, # number of inputs
                 # Note: Relaxing the CLF-CBF QP is tricky because there is an additional relaxation
                 # parameter already, balancing the CLF and CBF constraints.
-                relax_cbf=True,
+                relax_cbf=False,
                 # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
-                cbf_relaxation_penalty=1e6,
+                # cbf_relaxation_penalty=5e-6,
             )
 
         def f(self, z) -> Array:
@@ -115,21 +116,27 @@ def soft_robot_with_safety_contact_example():
             # Compute positions of all robotic segments
             chi_ps = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
             # Ignore orientation, keep x-y positions
-            p_ps = chi_ps[:,:2]
+            p_ps = chi_ps[:, :2]
+
+            # Remove the first point (base) from the list of points as its not controllable
+            p_ps = p_ps[1:]
+            s_ps = self.s_ps[1:]
 
             # Compute the distance to the obstacle center
             d2o_ps = jnp.linalg.norm((p_ps - self.obstacle_pos), ord=2, axis=1)
             # Compute safety margin for each segment
-            safety_margins = d2o_ps - self.obstacle_radius # minimal distance
+            safety_margins = d2o_ps - self.obstacle_radius - robot_radius # minimal distance
 
-            # jax.debug.print("Safety Margins: {}", safety_margins)
-            # safety_margins = min(safety_margins)
-            return safety_margins / (robot_length) #normalize
-            # return jnp.array([1])
+            # debug.print("Safety Margins: {safety_margins}", safety_margins=safety_margins)
 
+            # normalize the safety margin
+            # normalized_safety_margins = safety_margins / robot_length * safety_margins.shape[0] ** 4 * self.safety_margin_norm_factor
+            normalized_safety_margins = safety_margins * s_ps / robot_length * safety_margins.shape[0] ** 2 * self.safety_margin_norm_factor
+            return normalized_safety_margins
 
-        def alpha(self, h):
-            return 0.5 * h
+            # the "min-approach" seems to be unstable
+            # minimal_safety_margin = jnp.min(safety_margins / robot_length)[None] * 2
+            # return minimal_safety_margin
 
     def control_policy_fn(t: float, y: Array, q_des: Array) -> Array:
         """
@@ -242,15 +249,13 @@ def soft_robot_with_safety_contact_example():
     # Collect chi_ps values
     chi_ps_list = []
 
-    s_ps = jnp.linspace(0, robot_params["l"], 20)
-
     # Animate the motion and collect chi_ps
     img_ts = []
     for q in q_ts[::20]:
         img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius)
         img_ts.append(img)
 
-        chi_ps = batched_forward_kinematics_fn(robot_params, q, s_ps)
+        chi_ps = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
         # Store chi_ps as a list for each timestep
         chi_ps_list.append(onp.array(chi_ps))  # Convert to numpy array for easier handling
 
