@@ -288,10 +288,10 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             self.strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
-            self.obstacle_pos = jnp.array([-8e-2, 0.07]) # radius postion
+            self.obstacle_pos = jnp.array([-5e-2, 0.07]) # radius postion
             self.obstacle_radius = 1e-2 # radius obstacle
             self.s_ps = jnp.linspace(0, robot_length, 20) # segmented
-            self.q_des = jnp.array([jnp.pi * 3, 0.0, 0.2]) # destination
+            self.q_des = jnp.array([jnp.pi * 5, 0.0, 0.2]) # destination
 
             super().__init__(
                 n=6, # number of states
@@ -327,28 +327,34 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             return jnp.concatenate([zero_block, control_matrix], axis=0)
         
-        # def V_2(self, z) -> jnp.ndarray:
-        # # CLF: distance from tip to destination
-        #     q, q_d = jnp.split(z, 2)
+        def V_2(self, z) -> jnp.ndarray:
+        # CLF: distance from tip to destination
+            q, q_d = jnp.split(z, 2)
 
-        #     squared_differences = (q - self.q_des) ** 2
-        #     return squared_differences
+            p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
+            p = p[-1, :2]
+            p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
+            p_des = p_des[-1, :2]
+
+            squared_differences = jnp.linalg.norm((p - p_des)/robot_length, ord=2)**2
+            squared_differences = squared_differences[None,...]
+            return squared_differences
         
-        def V_1(self, z) -> jnp.ndarray:
-            q, q_d = jnp.split(z,2)
-            # compute the kinetic energy at the current configuration
-            T = kinetic_energy_fn(self.robot_params, q, q_d)
-            # compute the potential energy at the current configuration
-            U = potential_energy_fn(self.robot_params, q)
-            # compute the potential energy at the desired configuration
-            U_des = potential_energy_fn(self.robot_params, self.q_des)
-            # compute the dynamical matrices at the desired configuration
-            B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(self.robot_params, self.q_des, jnp.zeros_like(self.q_des))
+        # def V_1(self, z) -> jnp.ndarray:
+        #     q, q_d = jnp.split(z,2)
+        #     # compute the kinetic energy at the current configuration
+        #     T = kinetic_energy_fn(self.robot_params, q, q_d)
+        #     # compute the potential energy at the current configuration
+        #     U = potential_energy_fn(self.robot_params, q)
+        #     # compute the potential energy at the desired configuration
+        #     U_des = potential_energy_fn(self.robot_params, self.q_des)
+        #     # compute the dynamical matrices at the desired configuration
+        #     B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(self.robot_params, self.q_des, jnp.zeros_like(self.q_des))
 
-            # compute the control Lyapunov function
-            V = T + U - U_des + (G_des + K_des).T @ (self.q_des - q)
-            V = V[None, ...]
-            return V
+        #     # compute the control Lyapunov function
+        #     V = T + U - U_des + (G_des + K_des).T @ (self.q_des - q)
+        #     V = V[None, ...]
+        #     return V
         
         def h_2(self, z):
             # regulating "pose space"
@@ -382,10 +388,10 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # return minimal_safety_margin
         
         def alpha_2(self, h_2):
-            return h_2*5 #constant
+            return h_2*10 #constant
         
-        def gamma_1(self, v_1):
-            return v_1*20 #constant
+        def gamma_2(self, v_2):
+            return v_2*4 #constant
 
     config = SoRoConfig()
     clf_cbf = CLFCBF.from_config(config)
@@ -480,11 +486,13 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # Animate the motion and collect chi_ps
     img_ts = []
+    pos = batched_forward_kinematics_fn(config.robot_params, config.q_des, config.s_ps)
+    pos = pos[-1,:2]
     for q in q_ts[::20]:
-        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius)
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius, p_des = pos)
         img_ts.append(img)
 
-        chi_ps = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
+        chi_ps = batched_forward_kinematics_fn(config.robot_params, q, config.s_ps)
         # Store chi_ps as a list for each timestep
         chi_ps_list.append(onp.array(chi_ps))  # Convert to numpy array for easier handling
 

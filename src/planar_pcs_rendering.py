@@ -5,7 +5,6 @@ from jax import numpy as jnp
 import numpy as onp
 from typing import Callable, Dict, Optional, Tuple, Union
 
-
 def draw_image(
     batched_forward_kinematics_fn: Callable,
     auxiliary_fns: Dict[str, Callable],
@@ -13,6 +12,7 @@ def draw_image(
     q: Array,
     x_obs: Optional[Array] = None,
     R_obs: Optional[Union[float, Array]] = None,
+    p_des: Optional[Array] = None,
     img_width: int = 700,
     img_height: int = 700,
     num_points: int = 50,
@@ -25,6 +25,7 @@ def draw_image(
         q: joint angles
         x_obs: planar position of the obstacle
         R_obs: radius of the obstacle
+        p_des: target position
         img_width: image width
         img_height: image height
         num_points: number of points along the robot to plot
@@ -45,14 +46,13 @@ def draw_image(
     # poses along the robot of shape (3, N)
     chi_ps = batched_forward_kinematics_fn(robot_params, q, s_ps)
 
-    # the equilbrium distance between the backbone and the obstacle is the sum of the radii of the obstacle and the backbone
+    # the equilibrium distance between the backbone and the obstacle is the sum of the radii of the obstacle and the backbone
     r_backbone_ps = robot_params["r"][segment_idx_ps]
 
     img = 255 * onp.ones((w, h, 3), dtype=jnp.uint8)  # initialize background to white
     curve_origin = onp.array(
         [w // 2, 0.1 * h], dtype=onp.int32
     )  # in x-y pixel coordinates
-
 
     # draw base
     cv2.rectangle(img, (0, h - curve_origin[1]), (w, h), color=base_color, thickness=-1)
@@ -71,12 +71,20 @@ def draw_image(
             img, [curve[segment_ps_selector]], isClosed=False, color=robot_color, thickness=segment_thickness
         )
 
-    if x_obs is None or R_obs is None:
-        return img
+    if x_obs is not None and R_obs is not None:
+        # draw the obstacle
+        uv_obs = onp.array((curve_origin + x_obs * ppm), dtype=onp.int32)
+        # invert the v pixel coordinate
+        uv_obs[1] = h - uv_obs[1]
+        cv2.circle(img, tuple(uv_obs), int(R_obs * ppm), (0, 255, 0), thickness=-1)
 
-    # draw the obstacle
-    uv_obs = onp.array((curve_origin + x_obs * ppm), dtype=onp.int32)
-    # invert the v pixel coordinate
-    uv_obs[1] = h - uv_obs[1]
-    cv2.circle(img, tuple(uv_obs), int(R_obs * ppm), (0, 255, 0), thickness=-1)
+    if p_des is not None:
+        # draw the desired position as a cross
+        uv_des = onp.array((curve_origin + p_des * ppm), dtype=onp.int32)
+        # invert the v pixel coordinate
+        uv_des[1] = h - uv_des[1]
+        cross_size = int(10)  # size of the cross in pixels
+        cv2.line(img, (uv_des[0] - cross_size, uv_des[1]), (uv_des[0] + cross_size, uv_des[1]), (0, 0, 255), 2)
+        cv2.line(img, (uv_des[0], uv_des[1] - cross_size), (uv_des[0], uv_des[1] + cross_size), (0, 0, 255), 2)
+
     return img
