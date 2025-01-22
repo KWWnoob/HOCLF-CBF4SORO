@@ -288,7 +288,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             self.strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
-            self.obstacle_pos = jnp.array([-5e-2, 0.07]) # radius postion
+            self.obstacle_pos = jnp.array([-7e-2, 0.06]) # radius postion
             self.obstacle_radius = 1e-2 # radius obstacle
             self.s_ps = jnp.linspace(0, robot_length, 20) # segmented
             self.q_des = jnp.array([jnp.pi * 5, 0.0, 0.2]) # destination
@@ -300,7 +300,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 # parameter already, balancing the CLF and CBF constraints.
                 relax_cbf=False,
                 # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
-                cbf_relaxation_penalty=1e3,
+                cbf_relaxation_penalty=1e5,
                 clf_relaxation_penalty=10
             )
 
@@ -327,34 +327,53 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             return jnp.concatenate([zero_block, control_matrix], axis=0)
         
-        def V_2(self, z) -> jnp.ndarray:
-        # CLF: distance from tip to destination
-            q, q_d = jnp.split(z, 2)
+        # def V_2(self, z) -> jnp.ndarray:
+        # # CLF: distance from tip to destination
+        #     q, q_d = jnp.split(z, 2)    
 
-            p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
-            p = p[-1, :2]
-            p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
-            p_des = p_des[-1, :2]
+        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
+        #     p = p[-1, :2]
 
-            squared_differences = jnp.linalg.norm((p - p_des)/robot_length, ord=2)**2
-            squared_differences = squared_differences[None,...]
-            return squared_differences
+        #     p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
+        #     p_des = p_des[-1, :2]
+
+        #     Lyapnov_function = jnp.sqrt((p - p_des) ** 2)
+        #     # debug.print("{}",squared_differences)
+
+        #     return Lyapnov_function
         
-        # def V_1(self, z) -> jnp.ndarray:
-        #     q, q_d = jnp.split(z,2)
-        #     # compute the kinetic energy at the current configuration
-        #     T = kinetic_energy_fn(self.robot_params, q, q_d)
-        #     # compute the potential energy at the current configuration
-        #     U = potential_energy_fn(self.robot_params, q)
-        #     # compute the potential energy at the desired configuration
-        #     U_des = potential_energy_fn(self.robot_params, self.q_des)
-        #     # compute the dynamical matrices at the desired configuration
-        #     B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(self.robot_params, self.q_des, jnp.zeros_like(self.q_des))
+        # def V_2(self, z) -> jnp.ndarray:
+        # # CLF: distance from tip to destination
+        #     q, q_d = jnp.split(z, 2)    
 
-        #     # compute the control Lyapunov function
-        #     V = T + U - U_des + (G_des + K_des).T @ (self.q_des - q)
-        #     V = V[None, ...]
-        #     return V
+        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
+        #     p = p[-1, :2]
+
+        #     p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
+        #     p_des = p_des[-1, :2]
+
+        #     Lyapnov_function = jnp.linalg.norm(p-p_des)
+        #     Lyapnov_function = Lyapnov_function[None,...]
+        #     # debug.print("{}",squared_differences)
+
+        #     return Lyapnov_function
+        
+        def V_2(self, z) -> jnp.ndarray:   
+        # CLF: energy
+            q, q_d = jnp.split(z, 2)   
+
+            T = kinetic_energy_fn(robot_params, q, q_d)
+            # compute the potential energy at the current configuration
+            U = potential_energy_fn(robot_params, q)
+            # compute the potential energy at the desired configuration
+            U_des = potential_energy_fn(robot_params, self.q_des)
+            # compute the dynamical matrices at the desired configuration
+            B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(self.robot_params, self.q_des, jnp.zeros_like(self.q_des))
+
+            # compute the control Lyapunov function
+            V = T + U - U_des + (G_des + K_des).T @ (self.q_des - q)
+            V = V[None,...]
+            return V
         
         def h_2(self, z):
             # regulating "pose space"
@@ -388,10 +407,10 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # return minimal_safety_margin
         
         def alpha_2(self, h_2):
-            return h_2*10 #constant
+            return h_2*1 #constant, increase for smaller affected zone
         
         def gamma_2(self, v_2):
-            return v_2*4 #constant
+            return v_2*10 #constant
 
     config = SoRoConfig()
     clf_cbf = CLFCBF.from_config(config)
