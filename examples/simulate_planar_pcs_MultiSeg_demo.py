@@ -24,7 +24,7 @@ outputs_dir = Path("outputs") / "planar_pcs_simulation"
 outputs_dir.mkdir(parents=True, exist_ok=True)
 
 # load symbolic expressions
-num_segments = 1
+num_segments = 2
 # filepath to symbolic expressions
 sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"planar_pcs_ns-{num_segments}.dill"
 
@@ -42,7 +42,7 @@ robot_params = {
     "G": 1e3 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
 }
 # damping matrix
-robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3]) * robot_params["l"])
+robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3, 1e0, 1e3, 1e3]) * robot_length)
 
 # activate all strains (i.e. bending, shear, and axial)
 strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
@@ -76,8 +76,8 @@ def soft_robot_with_safety_contact_CBF_example():
             self.safety_margin_norm_factor = 1
 
             super().__init__(
-                n=6, # number of states
-                m=3, # number of inputs
+                n=12, # number of states
+                m=6, # number of inputs
                 # Note: Relaxing the CLF-CBF QP is tricky because there is an additional relaxation
                 # parameter already, balancing the CLF and CBF constraints.
                 relax_cbf=False,
@@ -531,5 +531,5 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     )
 
 if __name__ == "__main__":
-    # soft_robot_with_safety_contact_CBF_example()
-    soft_robot_with_safety_contact_CBFCLF_example()
+    soft_robot_with_safety_contact_CBF_example()
+    # soft_robot_with_safety_contact_CBFCLF_example()
