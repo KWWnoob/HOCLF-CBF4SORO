@@ -24,7 +24,7 @@ outputs_dir = Path("outputs") / "planar_pcs_simulation"
 outputs_dir.mkdir(parents=True, exist_ok=True)
 
 # load symbolic expressions
-num_segments = 1
+num_segments = 2
 # filepath to symbolic expressions
 sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"planar_pcs_ns-{num_segments}.dill"
 
