@@ -41,11 +41,7 @@ def draw_image(
 
     # we use for plotting N points along the length of the robot
     s_ps = jnp.linspace(0, L, num_points)
-    # segment_idx_ps, _ = auxiliary_fns["classify_segment"](robot_params, s_ps) # previous
-
-    from jax import vmap
-    classify_segment_vmap = vmap(auxiliary_fns["classify_segment"], in_axes=(None, 0))
-    segment_idx_ps, _ = classify_segment_vmap(robot_params, s_ps)
+    segment_idx_ps, _ = auxiliary_fns["classify_segment"](robot_params, s_ps)
 
     # poses along the robot of shape (3, N)
     chi_ps = batched_forward_kinematics_fn(robot_params, q, s_ps)
@@ -68,9 +64,7 @@ def draw_image(
     for segment_idx in jnp.unique(segment_idx_ps):
         segment_ps_selector = segment_idx_ps == segment_idx
         # determine the segment thickness
-        # segment_radius = r_backbone_ps[segment_ps_selector].item() #previous
-        segment_radius = r_backbone_ps[segment_idx].item()  # Use segment index directly
-
+        segment_radius = r_backbone_ps[segment_ps_selector].item()
         segment_thickness = int(2 * segment_radius * ppm)
         # draw the robot
         cv2.polylines(

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Callable, Dict, Tuple
 
 from src.img_animation import animate_images_cv2
-from src.planar_pcs_rendering import draw_image
+from src.planar_pcs_rendering_multiSeg import draw_image
 
 # define the outputs directory
 outputs_dir = Path("outputs") / "planar_pcs_simulation"
@@ -162,12 +162,12 @@ def soft_robot_regulation_example():
         return y_d
 
     # define the initial condition
-    q0 = jnp.array([jnp.pi, 0.01, 0.05])
+    q0 = jnp.array([jnp.pi, 0.01, 0.05,jnp.pi, 0.01, 0.05])
     q_d0 = jnp.zeros_like(q0)
     y0 = jnp.concatenate([q0, q_d0])
 
     # define the desired configuration
-    q_des = jnp.array([-jnp.pi, 0.0, 0.2])
+    q_des = jnp.array([-jnp.pi, 0.0, 0.2,-jnp.pi, 0.0, 0.2])
 
     # define the sampling and simulation time step
     dt = 1e-3
@@ -212,7 +212,7 @@ def soft_robot_regulation_example():
 
 def regulation_objective_example():
     # cost function weights
-    Q = jnp.diag(jnp.array([1/jnp.pi, 10.0, 5.0]))
+    Q = jnp.diag(jnp.array([1/jnp.pi, 10.0, 5.0, 1/jnp.pi, 10.0, 5.0]))
 
     def cost_fn(q: Array, q_des: Array) -> Array:
         """
@@ -227,12 +227,12 @@ def regulation_objective_example():
         cost = 0.5 * error.T @ Q @ error
         return cost
 
-    q = jnp.array([1.0, 0.01, 0.05])
-    q_des = jnp.array([0.0, 0.0, 0.2])
+    q = jnp.array([1.0, 0.01, 0.05, 1.0, 0.01, 0.05])
+    q_des = jnp.array([0.0, 0.0, 0.2, 0.0, 0.0, 0.2])
     cost = cost_fn(q, q_des)
     print(f"Cost for q = {q} and q_des = {q_des} is {cost}")
 
 if __name__ == "__main__":
-    soft_robot_ode_example()
-    # soft_robot_regulation_example()
+    # soft_robot_ode_example()
+    soft_robot_regulation_example()
     # regulation_objective_example()

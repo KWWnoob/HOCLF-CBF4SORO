@@ -9,6 +9,7 @@ def draw_image(
     batched_forward_kinematics_fn: Callable,
     auxiliary_fns: Dict[str, Callable],
     robot_params: Dict[str, Array],
+    num_segments: int,
     q: Array,
     x_obs: Optional[Array] = None,
     R_obs: Optional[Union[float, Array]] = None,
@@ -18,7 +19,7 @@ def draw_image(
     num_points: int = 50,
 ) -> onp.ndarray:
     """
-    Draw the robot in a 2D image.
+    Draw the robot in a 2D image with different colors for each segment.
     Arguments:
         batched_forward_kinematics_fn: function to compute the forward kinematics with interface (params, q, s_pts)
         robot_params: dictionary with robot parameters
@@ -36,12 +37,16 @@ def draw_image(
     # plotting in OpenCV
     h, w = img_height, img_width  # img height and width
     ppm = h / (2.0 * L)  # pixel per meter
-    base_color = (0, 0, 0)  # black robot_color in BGR
-    robot_color = (255, 0, 0)  # black robot_color in BGR
+    base_color = (0, 0, 0)  # black base color in BGR
+
+    # dynamically generate a color palette for each segment
+    segment_colors = [
+        (int(255 * (i / num_segments)), int(255 * ((i + 1) / num_segments)), int(255 * ((i + 2) / num_segments)))
+        for i in range(num_segments)
+    ]
 
     # we use for plotting N points along the length of the robot
     s_ps = jnp.linspace(0, L, num_points)
-    # segment_idx_ps, _ = auxiliary_fns["classify_segment"](robot_params, s_ps) # previous
 
     from jax import vmap
     classify_segment_vmap = vmap(auxiliary_fns["classify_segment"], in_axes=(None, 0))
@@ -60,21 +65,22 @@ def draw_image(
 
     # draw base
     cv2.rectangle(img, (0, h - curve_origin[1]), (w, h), color=base_color, thickness=-1)
+
     # transform robot poses to pixel coordinates
-    # should be of shape (N, 2)
     curve = onp.array((curve_origin + chi_ps[:, :2] * ppm), dtype=onp.int32)
     # invert the v pixel coordinate
     curve[:, 1] = h - curve[:, 1]
+
+    # draw each segment with its assigned color
     for segment_idx in jnp.unique(segment_idx_ps):
         segment_ps_selector = segment_idx_ps == segment_idx
-        # determine the segment thickness
-        # segment_radius = r_backbone_ps[segment_ps_selector].item() #previous
         segment_radius = r_backbone_ps[segment_idx].item()  # Use segment index directly
-
         segment_thickness = int(2 * segment_radius * ppm)
-        # draw the robot
+        segment_color = segment_colors[segment_idx]  # Get color for this segment
+
+        # draw the robot segment
         cv2.polylines(
-            img, [curve[segment_ps_selector]], isClosed=False, color=robot_color, thickness=segment_thickness
+            img, [curve[segment_ps_selector]], isClosed=False, color=segment_color, thickness=segment_thickness
         )
 
     if x_obs is not None and R_obs is not None:

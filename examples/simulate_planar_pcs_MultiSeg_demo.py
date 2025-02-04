@@ -17,14 +17,14 @@ from pathlib import Path
 from typing import Callable, Dict, Tuple
 
 from src.img_animation import animate_images_cv2
-from src.planar_pcs_rendering import draw_image
+from src.planar_pcs_rendering_multiSeg import draw_image
 
 # define the outputs directory
 outputs_dir = Path("outputs") / "planar_pcs_simulation"
 outputs_dir.mkdir(parents=True, exist_ok=True)
 
 # load symbolic expressions
-num_segments = 2
+num_segments = 3
 # filepath to symbolic expressions
 sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"planar_pcs_ns-{num_segments}.dill"
 
@@ -42,13 +42,16 @@ robot_params = {
     "G": 1e3 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
 }
 # damping matrix
-robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3, 1e0, 1e3, 1e3]) * robot_length)
+damping_array = jnp.array([1e0, 1e3, 1e3])
+multiplier = [1.5**m * damping_array for m in range(num_segments)]
+robot_params["D"] = 5e-5 * jnp.diag(jnp.concatenate(multiplier)) * robot_length #depend on the num of segments
 
 # activate all strains (i.e. bending, shear, and axial)
 strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
 # call the factory function for the planar PCS
 strain_basis, forward_kinematics_fn, dynamical_matrices_fn, auxiliary_fns = planar_pcs.factory(sym_exp_filepath, strain_selector)
+
 kinetic_energy_fn = jit(auxiliary_fns["kinetic_energy_fn"])
 potential_energy_fn = jit(auxiliary_fns["potential_energy_fn"])
 
@@ -288,14 +291,17 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             self.strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
-            self.obstacle_pos = jnp.array([-7e-2, 0.03]) # radius postion
+            self.obstacle_pos = jnp.array([-9e-2, 0.1]) # radius postion
             self.obstacle_radius = 1e-2 # radius obstacle
-            self.s_ps = jnp.linspace(0, robot_length, 20) # segmented
-            self.q_des = jnp.array([jnp.pi * 5, 0.0, 0.2]) # destination
+            self.s_ps = jnp.linspace(0, robot_length * num_segments, 7 * num_segments) # segmented
+
+            self.q_des_arary = jnp.array([jnp.pi*2, 0.1, 0.1])
+            multiplier = [1.1**m * self.q_des_arary for m in range(num_segments)]
+            self.q_des = jnp.concatenate(multiplier)# destination
 
             super().__init__(
-                n=6, # number of states
-                m=3, # number of inputs
+                n=6 * num_segments, # number of states
+                m=3 * num_segments, # number of inputs
                 # Note: Relaxing the CLF-CBF QP is tricky because there is an additional relaxation
                 # parameter already, balancing the CLF and CBF constraints.
                 relax_cbf=False,
@@ -312,7 +318,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             drift = (
                 -jnp.linalg.inv(B) @ (C @ q_d + D @ q_d + G + K)
             )
-
+            
             return jnp.concatenate([q_d, drift])
 
         def g(self, z) -> Array:
@@ -327,54 +333,130 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             return jnp.concatenate([zero_block, control_matrix], axis=0)
         
+
+        def V_2(self, z) -> jnp.ndarray:
+            # CLF: tracking error for both the middle point and the tip (last point)
+            
+            # Split state into positions (q) and velocities (q_d)
+            q, q_d = jnp.split(z, 2)
+            
+            # Compute forward kinematics for the current configuration.
+            # Assume p has shape (num_points, 2)
+            p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
+            
+            # Determine indices: use the middle point and the tip.
+            num_points = p.shape[0]
+            index = [num_points * (i+1)//num_segments for i in range(num_segments)]
+
+            p_list = [p[i, :2] for i in index]
+            
+            # Compute forward kinematics for the desired configuration.
+            p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
+            p_des_list = [p_des[i, :2] for i in index]
+            
+            # Compute the element-wise absolute differences (note that sqrt((x)^2) equals |x|).
+            # This returns a vector for each point.
+            error = [jnp.sqrt((p_list[i]-p_des_list[i])**2) for i in range(num_segments)]
+            
+            # Option: Return the errors as a single vector by concatenating the two.
+            V_total = jnp.concatenate(error)
+            
+            # V_total now is a 1D array containing the element-wise errors
+            # for the middle point followed by those for the tip.
+            return V_total
+
+        # def V_2(self, z) -> jnp.ndarray:
+        #     # CLF: tracking error for both the middle point and the tip (last point)
+            
+        #     # Split state into positions (q) and velocities (q_d)
+        #     q, q_d = jnp.split(z, 2)
+            
+        #     # Compute forward kinematics for the current configuration.
+        #     # Assume p has shape (num_points, 2)
+        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
+            
+        #     # Determine indices: use the middle point and the tip.
+        #     num_points = p.shape[0]
+        #     index = [num_points * (i+1)/num_segments for i in range(num_segments)]
+        #     mid_index = num_points // num  # middle index (adjust if needed)
+        #     tip_index = -1              # tip (last point)
+            
+        #     # Extract the positions for the current configuration.
+        #     p_mid = p[mid_index, :2]  # middle point
+        #     p_tip = p[tip_index, :2]  # tip of the second segment
+            
+        #     # Compute forward kinematics for the desired configuration.
+        #     p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
+        #     p_des_mid = p_des[mid_index, :2]  # desired middle point
+        #     p_des_tip = p_des[tip_index, :2]    # desired tip
+            
+        #     # Compute the element-wise absolute differences (note that sqrt((x)^2) equals |x|).
+        #     # This returns a vector for each point.
+        #     error_mid = jnp.sqrt((p_mid - p_des_mid) ** 2)
+        #     error_tip = jnp.sqrt((p_tip - p_des_tip) ** 2)
+            
+        #     # Option: Return the errors as a single vector by concatenating the two.
+        #     V_total = jnp.concatenate([error_mid, error_tip])
+            
+        #     # V_total now is a 1D array containing the element-wise errors
+        #     # for the middle point followed by those for the tip.
+        #     return V_total
+        
         # def V_2(self, z) -> jnp.ndarray:
         # # CLF: distance from tip to destination
         #     q, q_d = jnp.split(z, 2)    
 
         #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
-        #     p = p[-1, :2]
+        #     p_1 = p[9, :2]
+        #     p_2 = p[-1, :2]
+        #     p_concat = jnp.concatenate([p_1, p_2])
 
         #     p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
-        #     p_des = p_des[-1, :2]
+        #     p_des_1 = p_des[9, :2]
+        #     p_des_2 = p_des[-1, :2]
+        #     p_des_concat = jnp.concatenate([p_des_1, p_des_2])
 
-        #     Lyapnov_function = jnp.sqrt((p - p_des) ** 2)
+        #     Lyapnov_function = ((p_concat - p_des_concat) ** 2)
         #     # debug.print("{}",squared_differences)
 
-        #     return Lyapnov_function
+        #     return Lyapnov_function * 1
         
         # def V_2(self, z) -> jnp.ndarray:
-        # # CLF: distance from tip to destination
+        #     # Split state into positions and velocities
         #     q, q_d = jnp.split(z, 2)    
 
-        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
-        #     p = p[-1, :2]
+        #     # Compute forward kinematics for the current configuration
+        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)  # shape: (num_points, 2)
+            
+        #     # Choose indices for the endpoints
+        #     # For example, if self.s_ps has 20 points, you might choose:
+        #     i_mid = 9  # index for the endpoint of the first segment (adjust as needed)
+        #     i_tip = -1  # index for the tip (end of the second segment)
 
+        #     # Extract the endpoints
+        #     p_1 = p[i_mid, :2]  # first segment's endpoint
+        #     p_2 = p[i_tip, :2]  # second segment's endpoint (tip)
+
+        #     # Compute forward kinematics for the desired configuration
         #     p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
-        #     p_des = p_des[-1, :2]
+        #     p_des_1 = p_des[i_mid, :2]  # desired position for the first segment's endpoint
+        #     p_des_2 = p_des[i_tip, :2]  # desired position for the tip
 
-        #     Lyapnov_function = jnp.linalg.norm(p-p_des)
-        #     Lyapnov_function = Lyapnov_function[None,...]
-        #     # debug.print("{}",squared_differences)
+        #     # Define weights (you can adjust these to prioritize one endpoint over the other)
+        #     w1 = 1.0
+        #     w2 = 1.0
 
-        #     return Lyapnov_function
-        
-        def V_2(self, z) -> jnp.ndarray:   
-        # CLF: energy
-            q, q_d = jnp.split(z, 2)   
+        #     # Compute the squared errors at both endpoints
+        #     error1 = jnp.linalg.norm(p_1 - p_des_1) ** 2
+        #     error2 = jnp.linalg.norm(p_2 - p_des_2) ** 2
 
-            T = kinetic_energy_fn(robot_params, q, q_d)
-            # compute the potential energy at the current configuration
-            U = potential_energy_fn(robot_params, q)
-            # compute the potential energy at the desired configuration
-            U_des = potential_energy_fn(robot_params, self.q_des)
-            # compute the dynamical matrices at the desired configuration
-            B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(self.robot_params, self.q_des, jnp.zeros_like(self.q_des))
+        #     # Compute the overall Lyapunov function
+        #     V_total = 0.5 * (w1 * error1 + w2 * error2)
 
-            # compute the control Lyapunov function
-            V = T + U - U_des + (G_des + K_des).T @ (self.q_des - q)
-            V = V[None,...]
-            return V * 0.05
-        
+        #     V_total = V_total[None, ...]
+        #     return V_total*0.5
+
+
         def h_2(self, z):
             # regulating "pose space"
 
@@ -407,10 +489,10 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # return minimal_safety_margin
         
         def alpha_2(self, h_2):
-            return h_2*20 #constant, increase for smaller affected zone
+            return h_2*90 #constant, increase for smaller affected zone
         
         def gamma_2(self, v_2):
-            return v_2*20
+            return v_2*85
 
     config = SoRoConfig()
     clf_cbf = CLFCBF.from_config(config)
@@ -436,7 +518,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         return y_d
 
     # define the initial condition
-    q0 = jnp.array([jnp.pi, 0.01, 0.05])
+    q0_arary = jnp.array([jnp.pi, 0.01, 0.05])
+    multiplier = [q0_arary for m in range(num_segments)]
+    q0 = jnp.concatenate(multiplier)
 
     q_d0 = jnp.zeros_like(q0)
     y0 = jnp.concatenate([q0, q_d0])
@@ -446,7 +530,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # define the sampling and simulation time step
     dt = 1e-3
-    sim_dt = 5e-5
+    sim_dt = 1e-4
 
     # define the time steps
     ts = jnp.arange(0.0, 7.0, dt)
@@ -455,34 +539,38 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     ode_term = dx.ODETerm(closed_loop_ode_fn)
 
     # solve the ODE
-    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0, q_des, saveat=dx.SaveAt(ts=ts), max_steps=None)
+    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0, q_des, saveat=dx.SaveAt(ts=ts), max_steps=100000)
 
     # extract the results
     q_ts, q_d_ts = jnp.split(sol.ys, 2, axis=1)
 
     q_des_ts = jnp.tile(q_des, (ts.shape[0], 1))
+    print(q_des_ts.shape)
     # Compute tau_ts using vmap
     tau_ts = vmap(closed_loop_ode_fn)(ts, sol.ys, q_des_ts)
+    print(tau_ts)
 
     # Plot the motion and tau_ts
     fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True, num="Regulation example")
 
     # Plot strains
     # plot the reference strain evolution
-    axes[0].plot(ts, q_des_ts[:, 0], linewidth=3.0, linestyle=":", label=r"$\kappa_\mathrm{be}^\mathrm{d}$")
-    axes[1].plot(ts, q_des_ts[:, 1], linewidth=3.0, linestyle=":", label=r"$\sigma_\mathrm{sh}^\mathrm{d}$")
-    axes[2].plot(ts, q_des_ts[:, 2], linewidth=3.0, linestyle=":", label=r"$\sigma_\mathrm{ax}^\mathrm{d}$")
+    for i in range(num_segments):
+        axes[0].plot(ts, q_des_ts[:, i], linewidth=3.0, linestyle=":", label=r"$\kappa_\mathrm{be}^\mathrm{d}$")
+        axes[1].plot(ts, q_des_ts[:, i+1], linewidth=3.0, linestyle=":", label=r"$\sigma_\mathrm{sh}^\mathrm{d}$")
+        axes[2].plot(ts, q_des_ts[:, i+2], linewidth=3.0, linestyle=":", label=r"$\sigma_\mathrm{ax}^\mathrm{d}$")
     # reset the color cycle
     axes[0].set_prop_cycle(None)
     axes[1].set_prop_cycle(None)
     axes[2].set_prop_cycle(None)
     # plot the actual strain evolution
-    axes[0].plot(ts, q_ts[:, 0], linewidth=2.0, label=r"$\kappa_\mathrm{be}$")
-    axes[1].plot(ts, q_ts[:, 1], linewidth=2.0, label=r"$\sigma_\mathrm{sh}$")
-    axes[2].plot(ts, q_ts[:, 2], linewidth=2.0, label=r"$\sigma_\mathrm{ax}$")
+    for i in range(num_segments):
+        axes[0].plot(ts, q_ts[:, i], linewidth=2.0, label=r"$\kappa_\mathrm{be}$")
+        axes[1].plot(ts, q_ts[:, i+1], linewidth=2.0, label=r"$\sigma_\mathrm{sh}$")
+        axes[2].plot(ts, q_ts[:, i+2], linewidth=2.0, label=r"$\sigma_\mathrm{ax}$")
 
     # Plot control inputs tau_ts
-    for i in range(tau_ts.shape[1]):  # Assuming tau_ts has multiple dimensions (e.g., torques for each actuator)
+    for i in range(tau_ts.shape[1]//2):  # Assuming tau_ts has multiple dimensions (e.g., torques for each actuator)
         axes[3].plot(ts, tau_ts[:, i], label=f"Control Input {i+1}")
 
     # Set labels and legends
@@ -507,8 +595,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     img_ts = []
     pos = batched_forward_kinematics_fn(config.robot_params, config.q_des, config.s_ps)
     pos = pos[-1,:2]
+    print(pos)
     for q in q_ts[::20]:
-        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius, p_des = pos)
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, num_segments, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius, p_des = pos)
         img_ts.append(img)
 
         chi_ps = batched_forward_kinematics_fn(config.robot_params, q, config.s_ps)
@@ -531,5 +620,5 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     )
 
 if __name__ == "__main__":
-    soft_robot_with_safety_contact_CBF_example()
-    # soft_robot_with_safety_contact_CBFCLF_example()
+    # soft_robot_with_safety_contact_CBF_example()
+    soft_robot_with_safety_contact_CBFCLF_example()
