@@ -24,7 +24,7 @@ outputs_dir = Path("outputs") / "planar_pcs_simulation"
 outputs_dir.mkdir(parents=True, exist_ok=True)
 
 # load symbolic expressions
-num_segments = 3
+num_segments = 1
 # filepath to symbolic expressions
 sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"planar_pcs_ns-{num_segments}.dill"
 
@@ -76,11 +76,15 @@ def soft_robot_with_safety_contact_CBF_example():
             self.obstacle_radius = 1e-2
             self.s_ps = jnp.linspace(0, robot_length, 20)
 
+            self.q_des_arary = jnp.array([jnp.pi*3, 0.0, 0.2])
+            multiplier = [1.1**m * self.q_des_arary for m in range(num_segments)]
+            self.q_des = jnp.concatenate(multiplier)# destination
+
             self.safety_margin_norm_factor = 1
 
             super().__init__(
-                n=12, # number of states
-                m=6, # number of inputs
+                n=2*3*num_segments, # number of states
+                m=3*num_segments, # number of inputs
                 # Note: Relaxing the CLF-CBF QP is tricky because there is an additional relaxation
                 # parameter already, balancing the CLF and CBF constraints.
                 relax_cbf=False,
@@ -166,16 +170,22 @@ def soft_robot_with_safety_contact_CBF_example():
     config = SoRoConfig()
     cbf = CBF.from_config(config)
 
-    def closed_loop_ode_fn(t: float, y: Array, q_des: Array) -> Array:
-        # split the state vector into the configuration and velocity
-        q, q_d = jnp.split(y, 2)
-
+    def safety_filtered_control_policy_fn(t: float, y: Array, q_des: Array):
         # evaluate the control policy
         tau = control_policy_fn(t, y, q_des)
 
         # evaluate the safe control polic
         tau_filtered = cbf.safety_filter(y, tau)
+
         # tau_filtered = tau
+
+        return tau_filtered
+
+    def closed_loop_ode_fn(t: float, y: Array, q_des: Array) -> Array:
+        # split the state vector into the configuration and velocity
+        q, q_d = jnp.split(y, 2)
+
+        tau_filtered = safety_filtered_control_policy_fn(t, y, q_des)
 
         # compute the dynamical matrices
         B, C, G, K, D, alpha = dynamical_matrices_fn(robot_params, q, q_d)
@@ -189,13 +199,12 @@ def soft_robot_with_safety_contact_CBF_example():
         return y_d
 
     # define the initial condition
-    q0 = jnp.array([jnp.pi, 0.01, 0.05])
+    q0_arary = jnp.array([jnp.pi, 0.01, 0.05])
+    multiplier = [q0_arary for m in range(num_segments)]
+    q0 = jnp.concatenate(multiplier)
 
     q_d0 = jnp.zeros_like(q0)
     y0 = jnp.concatenate([q0, q_d0])
-
-    # define the desired configuration
-    q_des = jnp.array([jnp.pi * 3, 0.0, 0.2])
 
     # define the sampling and simulation time step
     dt = 1e-3
@@ -208,14 +217,15 @@ def soft_robot_with_safety_contact_CBF_example():
     ode_term = dx.ODETerm(closed_loop_ode_fn)
 
     # solve the ODE
-    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0, q_des, saveat=dx.SaveAt(ts=ts), max_steps=None)
+    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0, config.q_des, saveat=dx.SaveAt(ts=ts), max_steps=None)
 
     # extract the results
     q_ts, q_d_ts = jnp.split(sol.ys, 2, axis=1)
 
-    q_des_ts = jnp.tile(q_des, (ts.shape[0], 1))
+    q_des_ts = jnp.tile(config.q_des, (ts.shape[0], 1))
     # Compute tau_ts using vmap
-    tau_ts = vmap(closed_loop_ode_fn)(ts, sol.ys, q_des_ts)
+    tau_ts = vmap(safety_filtered_control_policy_fn)(ts, sol.ys, q_des_ts)
+    print("tau_ts", tau_ts.shape)
 
     # Plot the motion and tau_ts
     fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True, num="Regulation example")
@@ -258,8 +268,11 @@ def soft_robot_with_safety_contact_CBF_example():
 
     # Animate the motion and collect chi_ps
     img_ts = []
+    pos = batched_forward_kinematics_fn(config.robot_params, config.q_des, config.s_ps)
+    pos = pos[-1,:2]
+    print("pos", pos)
     for q in q_ts[::20]:
-        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius)
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, num_segments, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius, p_des = pos)
         img_ts.append(img)
 
         chi_ps = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
@@ -539,16 +552,16 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     ode_term = dx.ODETerm(closed_loop_ode_fn)
 
     # solve the ODE
-    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0, q_des, saveat=dx.SaveAt(ts=ts), max_steps=100000)
+    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0, q_des, saveat=dx.SaveAt(ts=ts), max_steps=None)
 
     # extract the results
     q_ts, q_d_ts = jnp.split(sol.ys, 2, axis=1)
 
     q_des_ts = jnp.tile(q_des, (ts.shape[0], 1))
-    print(q_des_ts.shape)
+    print("q_des_ts", q_des_ts.shape)
     # Compute tau_ts using vmap
-    tau_ts = vmap(closed_loop_ode_fn)(ts, sol.ys, q_des_ts)
-    print(tau_ts)
+    tau_ts = vmap(clf_cbf.controller)(sol.ys, q_des_ts)
+    print("tau_ts", tau_ts.shape)
 
     # Plot the motion and tau_ts
     fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True, num="Regulation example")
@@ -595,7 +608,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     img_ts = []
     pos = batched_forward_kinematics_fn(config.robot_params, config.q_des, config.s_ps)
     pos = pos[-1,:2]
-    print(pos)
+    print("pos", pos)
     for q in q_ts[::20]:
         img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, num_segments, q, x_obs=config.obstacle_pos, R_obs=config.obstacle_radius, p_des = pos)
         img_ts.append(img)
