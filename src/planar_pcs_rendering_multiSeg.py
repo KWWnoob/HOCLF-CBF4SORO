@@ -14,6 +14,7 @@ def draw_image(
     x_obs: Optional[Array] = None,
     R_obs: Optional[Union[float, Array]] = None,
     p_des: Optional[Array] = None,
+    poly_points: Optional[Array] = None,
     img_width: int = 700,
     img_height: int = 700,
     num_points: int = 50,
@@ -99,4 +100,16 @@ def draw_image(
         cv2.line(img, (uv_des[0] - cross_size, uv_des[1]), (uv_des[0] + cross_size, uv_des[1]), (0, 0, 255), 2)
         cv2.line(img, (uv_des[0], uv_des[1] - cross_size), (uv_des[0], uv_des[1] + cross_size), (0, 0, 255), 2)
 
+    if poly_points is not None:
+        poly_points_pixel = []
+        for point in poly_points:
+            uv_poly = onp.array((curve_origin + point * ppm), dtype=onp.int32)
+            uv_poly[1] = h - uv_poly[1]
+
+            poly_points_pixel.append(uv_poly)
+
+        poly_points_pixel = onp.array(poly_points_pixel, dtype=onp.int32).reshape((-1, 1, 2))
+
+        cv2.polylines(img, [poly_points_pixel], isClosed=True, color=(255,0,0), thickness=3)
+        cv2.fillPoly(img, [poly_points_pixel], color=(255, 0, 0))
     return img

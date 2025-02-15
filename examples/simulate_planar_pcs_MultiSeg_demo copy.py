@@ -378,97 +378,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # for the middle point followed by those for the tip.
             return V_total
 
-        # def V_2(self, z) -> jnp.ndarray:
-        #     # CLF: tracking error for both the middle point and the tip (last point)
-            
-        #     # Split state into positions (q) and velocities (q_d)
-        #     q, q_d = jnp.split(z, 2)
-            
-        #     # Compute forward kinematics for the current configuration.
-        #     # Assume p has shape (num_points, 2)
-        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
-            
-        #     # Determine indices: use the middle point and the tip.
-        #     num_points = p.shape[0]
-        #     index = [num_points * (i+1)/num_segments for i in range(num_segments)]
-        #     mid_index = num_points // num  # middle index (adjust if needed)
-        #     tip_index = -1              # tip (last point)
-            
-        #     # Extract the positions for the current configuration.
-        #     p_mid = p[mid_index, :2]  # middle point
-        #     p_tip = p[tip_index, :2]  # tip of the second segment
-            
-        #     # Compute forward kinematics for the desired configuration.
-        #     p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
-        #     p_des_mid = p_des[mid_index, :2]  # desired middle point
-        #     p_des_tip = p_des[tip_index, :2]    # desired tip
-            
-        #     # Compute the element-wise absolute differences (note that sqrt((x)^2) equals |x|).
-        #     # This returns a vector for each point.
-        #     error_mid = jnp.sqrt((p_mid - p_des_mid) ** 2)
-        #     error_tip = jnp.sqrt((p_tip - p_des_tip) ** 2)
-            
-        #     # Option: Return the errors as a single vector by concatenating the two.
-        #     V_total = jnp.concatenate([error_mid, error_tip])
-            
-        #     # V_total now is a 1D array containing the element-wise errors
-        #     # for the middle point followed by those for the tip.
-        #     return V_total
-        
-        # def V_2(self, z) -> jnp.ndarray:
-        # # CLF: distance from tip to destination
-        #     q, q_d = jnp.split(z, 2)    
-
-        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
-        #     p_1 = p[9, :2]
-        #     p_2 = p[-1, :2]
-        #     p_concat = jnp.concatenate([p_1, p_2])
-
-        #     p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
-        #     p_des_1 = p_des[9, :2]
-        #     p_des_2 = p_des[-1, :2]
-        #     p_des_concat = jnp.concatenate([p_des_1, p_des_2])
-
-        #     Lyapnov_function = ((p_concat - p_des_concat) ** 2)
-        #     # debug.print("{}",squared_differences)
-
-        #     return Lyapnov_function * 1
-        
-        # def V_2(self, z) -> jnp.ndarray:
-        #     # Split state into positions and velocities
-        #     q, q_d = jnp.split(z, 2)    
-
-        #     # Compute forward kinematics for the current configuration
-        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)  # shape: (num_points, 2)
-            
-        #     # Choose indices for the endpoints
-        #     # For example, if self.s_ps has 20 points, you might choose:
-        #     i_mid = 9  # index for the endpoint of the first segment (adjust as needed)
-        #     i_tip = -1  # index for the tip (end of the second segment)
-
-        #     # Extract the endpoints
-        #     p_1 = p[i_mid, :2]  # first segment's endpoint
-        #     p_2 = p[i_tip, :2]  # second segment's endpoint (tip)
-
-        #     # Compute forward kinematics for the desired configuration
-        #     p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
-        #     p_des_1 = p_des[i_mid, :2]  # desired position for the first segment's endpoint
-        #     p_des_2 = p_des[i_tip, :2]  # desired position for the tip
-
-        #     # Define weights (you can adjust these to prioritize one endpoint over the other)
-        #     w1 = 1.0
-        #     w2 = 1.0
-
-        #     # Compute the squared errors at both endpoints
-        #     error1 = jnp.linalg.norm(p_1 - p_des_1) ** 2
-        #     error2 = jnp.linalg.norm(p_2 - p_des_2) ** 2
-
-        #     # Compute the overall Lyapunov function
-        #     V_total = 0.5 * (w1 * error1 + w2 * error2)
-
-        #     V_total = V_total[None, ...]
-        #     return V_total*0.5
-
 
         def h_2(self, z):
             # regulating "pose space"
@@ -583,7 +492,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         axes[2].plot(ts, q_ts[:, i+2], linewidth=2.0, label=r"$\sigma_\mathrm{ax}$")
 
     # Plot control inputs tau_ts
-    for i in range(tau_ts.shape[1]//2):  # Assuming tau_ts has multiple dimensions (e.g., torques for each actuator)
+    for i in range(tau_ts.shape[1]):  # Assuming tau_ts has multiple dimensions (e.g., torques for each actuator)
         axes[3].plot(ts, tau_ts[:, i], label=f"Control Input {i+1}")
 
     # Set labels and legends
