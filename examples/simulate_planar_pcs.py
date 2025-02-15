@@ -264,27 +264,44 @@ def control_lyapunov_function_example():
     q_d = jnp.zeros_like(q_des)
 
     # define a grid of configurations
-    kappa_be_grid, sigma_ax_grid = jnp.meshgrid(jnp.linspace(-jnp.pi, jnp.pi, 200), jnp.linspace(-0.1, 0.1, 200))
+    kappa_be_grid, sigma_ax_grid = jnp.meshgrid(jnp.linspace(-3*jnp.pi, 3*jnp.pi, 500), jnp.linspace(-0.3, 0.3, 500))
 
     # compute the control Lyapunov function on the grid
     kappa_be_pts, sigma_ax_pts = kappa_be_grid.flatten(), sigma_ax_grid.flatten()
     q_pts = jnp.column_stack([kappa_be_pts, jnp.zeros_like(kappa_be_pts), sigma_ax_pts])
-    V_pts = vmap(
+    U_pts = vmap(
         control_lyapunov_fn, 
         in_axes=(None, 0, None, None)
     )(robot_params, q_pts, q_d, q_des)
+    T_pts = vmap(
+        control_lyapunov_fn, 
+        in_axes=(None, None, 0, None)
+    )(robot_params, jnp.zeros_like(q_des), q_pts, q_des)
 
     # reshape the results
-    V_grid = V_pts.reshape(kappa_be_grid.shape)
+    U_grid = U_pts.reshape(kappa_be_grid.shape)
+    T_grid = T_pts.reshape(kappa_be_grid.shape)
 
-    # plot the control Lyapunov function
-    fig, ax = plt.subplots(1, 1, figsize=(10, 10), num="Control Lyapunov function")
-    cs = ax.contourf(kappa_be_grid, sigma_ax_grid, V_grid, levels=100)
+    # plot the potential energy
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10), num="CLF: Potential energy")
+    cs = ax.contourf(kappa_be_grid, sigma_ax_grid, U_grid, levels=100)
     fig.colorbar(cs, ax=ax, label="Control Lyapunov Function")
     # plot the contour lines
-    ax.contour(kappa_be_grid, sigma_ax_grid, V_grid, levels=20, colors="black", alpha=0.5)
-    ax.set_xlabel(r"Bending strain $\kappa_\mathrm{be}$")
-    ax.set_ylabel(r"Axial strain $\sigma_\mathrm{ax}$")
+    ax.contour(kappa_be_grid, sigma_ax_grid, U_grid, levels=20, colors="black", alpha=0.5)
+    ax.set_xlabel(r"Bending strain $\kappa_\mathrm{be}$ [rad/m]")
+    ax.set_ylabel(r"Axial strain $\sigma_\mathrm{ax}$ [-]")
+    ax.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # plot the kinetic energy
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10), num="CLF: Kinetic energy")
+    cs = ax.contourf(kappa_be_grid, sigma_ax_grid, T_grid, levels=100)
+    fig.colorbar(cs, ax=ax, label="Kinetic Energy")
+    # plot the contour lines
+    ax.contour(kappa_be_grid, sigma_ax_grid, T_grid, levels=20, colors="black", alpha=0.5)
+    ax.set_xlabel(r"Bending strain velocity $\dot{\kappa}_\mathrm{be}$ [rad/(m s)]")
+    ax.set_ylabel(r"Axial strain velocity $\dot{\sigma}_\mathrm{ax}$ [1/s]")
     ax.grid(True)
     plt.tight_layout()
     plt.show()
