@@ -65,10 +65,7 @@ batched_forward_kinematics_fn = vmap(
     forward_kinematics_fn, in_axes=(None, None, 0)
 )
 
-# --- 定义前面提供的函数 ---
-def project_points(points, axis):
-    projections = jnp.dot(points, axis)
-    return jnp.min(projections), jnp.max(projections)
+# ---Polygon matters---
 
 def get_normals(vertices):
     edges = jnp.roll(vertices, -1, axis=0) - vertices
@@ -163,29 +160,76 @@ def segmented_polygon(current_point, next_point,forward_direction,robotic_radius
 
     return jnp.array(vertices)
 
-def circle_to_polygon(center: jnp.ndarray, radius: float, num_sides: int) -> jnp.ndarray:
+def minkowski_sum_convex(poly1, poly2):
     """
-    Approximates a circle by a regular polygon using a list comprehension.
+    Computes the Minkowski sum of two convex polygons.
     
-    Args:
-        center: A JAX array of shape (2,) representing the circle's center.
-        radius: The circle's radius.
-        num_sides: The number of vertices for the polygon approximation.
-        
+    Both poly1 and poly2 must be provided as jnp.array of shape (N,2) and 
+    (M,2) respectively, with vertices ordered counter-clockwise.
+    
     Returns:
-        A JAX array of shape (num_sides, 2) with each row as a vertex.
+        A jnp.array of shape (K,2) representing the Minkowski sum polygon.
     """
-    # Generate evenly spaced angles between 0 and 2π (endpoint excluded)
-    angles = jnp.linspace(0, 2 * jnp.pi, num_sides, endpoint=False)
+    # Convert to numpy arrays for ease of iteration (polygons are expected to be small)
+    poly1_np = jnp.array(poly1)
+    poly2_np = jnp.array(poly2)
     
-    # Compute each vertex using a list comprehension
-    vertices = jnp.array([
-        [center[0] + radius * jnp.cos(angle),
-         center[1] + radius * jnp.sin(angle)]
-        for angle in angles
-    ])
-    print(vertices)
-    return vertices
+    n = poly1_np.shape[0]
+    m = poly2_np.shape[0]
+    
+    # Find the indices of the vertices with the smallest x (and then y) for each polygon.
+    i0 = jnp.argmin(poly1_np[:, 0] + 1e-8*poly1_np[:, 1])
+    j0 = jnp.argmin(poly2_np[:, 0] + 1e-8*poly2_np[:, 1])
+    
+    i, j = i0, j0
+    result = []
+    
+    # Loop through each edge of both polygons
+    while True:
+        result.append(poly1_np[i] + poly2_np[j])
+        # Compute next indices (wrap-around)
+        next_i = (i + 1) % n
+        next_j = (j + 1) % m
+        
+        # Compute edge vectors
+        edge1 = poly1_np[next_i] - poly1_np[i]
+        edge2 = poly2_np[next_j] - poly2_np[j]
+        
+        # Compute cross product (z-component)
+        cross = edge1[0] * edge2[1] - edge1[1] * edge2[0]
+        
+        # Advance in the polygon(s) based on the cross product
+        if cross >= 0:
+            i = next_i
+        if cross <= 0:
+            j = next_j
+        
+        # Terminate when we've looped back to the start in both polygons
+        if i == i0 and j == j0:
+            break
+
+    return jnp.array(result)
+
+def round_polygon_corners_minkowski(poly, radius, num_circle_points=16):
+    """
+    Rounds the corners of a polygon using the Minkowski sum with a discretized circle.
+    
+    Parameters:
+        poly: jnp.array of shape (N, 2) representing the polygon vertices (assumed to be in CCW order).
+        radius: Rounding radius.
+        num_circle_points: Number of points used to approximate the circle.
+    
+    Returns:
+        A jnp.array representing the rounded polygon.
+    """
+    # Create a discretized circle (approximating a disk) as a convex polygon.
+    angles = jnp.linspace(0, 2 * jnp.pi, num_circle_points, endpoint=False)
+    circle = jnp.stack([radius * jnp.cos(angles), radius * jnp.sin(angles)], axis=1)
+    
+    # Compute the Minkowski sum of the original polygon and the circle.
+    # This gives the offset polygon with rounded corners.
+    rounded_poly = minkowski_sum_convex(poly, circle)
+    return rounded_poly
 
 def soft_robot_with_safety_contact_CBFCLF_example():
     
@@ -202,25 +246,20 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             '''Circular Obstacle Parameter'''
             self.cir_obstacle_center = jnp.array([-1e-2, 0.12]) # radius postion
             self.cir_obstacle_radius = 1e-2 # radius obstacle
-            # self.num_sides = 10 # Adjust the number of sides for the polygon approximation of the circle.
-            
-            # Create a polygonal approximation of the circle.
-            # self.cir_obstacle_shape = circle_to_polygon(self.cir_obstacle_center, self.cir_obstacle_radius, self.num_sides)
-            # self.cir_obstacle_pos = self.cir_obstacle_shape + jnp.array([-0.03,0.03])
 
             '''Polygon Obstacle Parameter'''
-            self.poly_obstacle_shape = jnp.array([[0.0, 0.0],
-                                                [0.0, 0.06],
-                                                [0.06, 0.06],
-                                                [0.06, 0.0]])
-            
+            # self.poly_obstacle_shape = jnp.array([[0.0, 0.0],
+            #                                     [0.0, 0.17],
+            #                                     [0.03, 0.17],
+            #                                     [0.03, 0.0]])
 
-            # self.poly_obstacle_shape = jnp.array([[ 0.00000,  0.00851],
-            #                                         [-0.00809,  0.00263],
-            #                                         [-0.00500, -0.00688],
-            #                                         [ 0.00500, -0.00688],
-            #                                         [ 0.00809,  0.00264]])
-            self.poly_obstacle_pos = self.poly_obstacle_shape + jnp.array([-0.10,0.02])
+            self.poly_obstacle_shape = jnp.array([[ 0.00000,  0.00851],
+                                                    [-0.00809,  0.00263],
+                                                    [-0.00500, -0.00688],
+                                                    [ 0.00500, -0.00688],
+                                                    [ 0.00809,  0.00264]])
+            # self.rounded_poly = round_polygon_corners_minkowski(self.poly_obstacle_shape, radius=0.005, num_circle_points=16)
+            self.poly_obstacle_pos = self.poly_obstacle_shape + jnp.array([-0.04,0.07])
 
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 10 * num_segments) # segmented
@@ -443,6 +482,28 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     force_list_poly = []
 
+    # for q in q_ts[::20]:
+    #     p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
+    #     p_ps = p[:, :2]
+    #     p_orientation = p[:, 2]
+    #     current_points = p_ps[:-1]
+
+    #     next_points = p_ps[1:]
+    #     orientations = p_orientation[:-1]
+    #     def seg_pen(current, nxt, orientation):
+    #         seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
+    #         return compute_distance(seg_poly, config.poly_obstacle_pos)
+    #     seg_pen_vec = jax.vmap(seg_pen)(current_points, next_points, orientations)
+
+    #     if jnp.any(seg_pen_vec) < 0:
+    #         worst_pen = jnp.max(seg_pen_vec[seg_pen_vec < 0])
+    #     else:
+    #         worst_pen = jnp.min(seg_pen_vec)
+
+    #     # worst_pen = jnp.min(seg_pen_vec)
+    #     # force = jnp.where(worst_pen >= 0, 0.0, -config.contact_spring_constant * worst_pen)
+    #     force_list_poly.append(worst_pen)
+
     for q in q_ts[::20]:
         p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
         p_ps = p[:, :2]
@@ -455,11 +516,11 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
             return compute_distance(seg_poly, config.poly_obstacle_pos)
         seg_pen_vec = jax.vmap(seg_pen)(current_points, next_points, orientations)
-
+        
         if jnp.any(seg_pen_vec) < 0:
-            worst_pen = jnp.max(seg_pen_vec[seg_pen_vec < 0])
+            worst_pen = 0
         else:
-            worst_pen = jnp.min(seg_pen_vec)
+            worst_pen = 1
 
         # worst_pen = jnp.min(seg_pen_vec)
         # force = jnp.where(worst_pen >= 0, 0.0, -config.contact_spring_constant * worst_pen)
@@ -543,8 +604,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     axes[2].set_ylabel(r"Axial strain $\sigma_\mathrm{ax}$")
     axes[3].set_ylabel(r"Control inputs $\tau$")
     axes[4].set_ylabel(r"Contact Force/Cir Newton")
-    axes[4].set_ylabel(r"Contact Force/Poly Newton")
-    axes[4].set_xlabel("Time [s]")
+    axes[5].set_ylabel(r"Contact Force/Poly Newton")
+    axes[5].set_xlabel("Time [s]")
 
     # Add legends and grid
     for ax in axes:

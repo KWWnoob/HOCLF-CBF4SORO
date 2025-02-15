@@ -163,30 +163,6 @@ def segmented_polygon(current_point, next_point,forward_direction,robotic_radius
 
     return jnp.array(vertices)
 
-def circle_to_polygon(center: jnp.ndarray, radius: float, num_sides: int) -> jnp.ndarray:
-    """
-    Approximates a circle by a regular polygon using a list comprehension.
-    
-    Args:
-        center: A JAX array of shape (2,) representing the circle's center.
-        radius: The circle's radius.
-        num_sides: The number of vertices for the polygon approximation.
-        
-    Returns:
-        A JAX array of shape (num_sides, 2) with each row as a vertex.
-    """
-    # Generate evenly spaced angles between 0 and 2π (endpoint excluded)
-    angles = jnp.linspace(0, 2 * jnp.pi, num_sides, endpoint=False)
-    
-    # Compute each vertex using a list comprehension
-    vertices = jnp.array([
-        [center[0] + radius * jnp.cos(angle),
-         center[1] + radius * jnp.sin(angle)]
-        for angle in angles
-    ])
-    print(vertices)
-    return vertices
-
 def soft_robot_with_safety_contact_CBFCLF_example():
     
     # define the ODE function
@@ -199,28 +175,14 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             self.strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
-            '''Circular Obstacle Parameter'''
-            self.cir_obstacle_center = jnp.array([-1e-2, 0.12]) # radius postion
-            self.cir_obstacle_radius = 1e-2 # radius obstacle
-            # self.num_sides = 10 # Adjust the number of sides for the polygon approximation of the circle.
-            
-            # Create a polygonal approximation of the circle.
-            # self.cir_obstacle_shape = circle_to_polygon(self.cir_obstacle_center, self.cir_obstacle_radius, self.num_sides)
-            # self.cir_obstacle_pos = self.cir_obstacle_shape + jnp.array([-0.03,0.03])
-
             '''Polygon Obstacle Parameter'''
             self.poly_obstacle_shape = jnp.array([[0.0, 0.0],
-                                                [0.0, 0.06],
-                                                [0.06, 0.06],
-                                                [0.06, 0.0]])
+                                                [0.0, robot_length*num_segments],
+                                                [robot_length*num_segments, robot_length*num_segments],
+                                                [robot_length*num_segments, 0.0]])
             
 
-            # self.poly_obstacle_shape = jnp.array([[ 0.00000,  0.00851],
-            #                                         [-0.00809,  0.00263],
-            #                                         [-0.00500, -0.00688],
-            #                                         [ 0.00500, -0.00688],
-            #                                         [ 0.00809,  0.00264]])
-            self.poly_obstacle_pos = self.poly_obstacle_shape + jnp.array([-0.10,0.02])
+            self.poly_obstacle_pos = self.poly_obstacle_shape + jnp.array([-0.18,0.02])
 
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 10 * num_segments) # segmented
@@ -337,16 +299,10 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             penetration_depth_poly = jax.vmap(segment_penetration)(current_points, next_points, orientations)
             # jax.debug.print()
             
-            d2o_ps = jnp.linalg.norm((p_ps - self.cir_obstacle_center), ord=2, axis=1)
-            penetration_depth_cir = d2o_ps - self.cir_obstacle_radius - robot_radius
 
             # -------- Compute the smooth force outputs --------
             contact_spring_constant = self.contact_spring_constant
             maximum_withhold_force = self.maximum_withhold_force
-
-            # Compute the smooth force for the circular obstacle using a sigmoid to smooth the transition.
-            force_smooth_cir = (penetration_depth_cir * contact_spring_constant + maximum_withhold_force) * \
-                            (1 - jax.nn.sigmoid(20 * penetration_depth_cir))
             
             # Compute the smooth force for the polygon obstacle in a similar way.
             force_smooth_poly = (penetration_depth_poly * contact_spring_constant+ maximum_withhold_force) * \
@@ -354,7 +310,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             
             # Combine the forces from both the circular and polygon obstacles.
             # You may choose to add them instead of concatenating depending on the desired behavior.
-            force_smooth = jnp.concatenate([force_smooth_cir,force_smooth_poly], axis=0)
+            force_smooth = jnp.concatenate([force_smooth_poly], axis=0)
             
             return force_smooth
             
@@ -420,27 +376,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     tau_ts = vmap(clf_cbf.controller)(sol.ys, q_des_ts) #TODO: understand this
     print("tau_ts", tau_ts.shape)
 
-    force_list_cir = []
-    # Getting the position of the points based on the pose
-    for q in q_ts[::20]:
-        p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
-        p_ps = p[:, :2]
-        p_orientation = p[:, 2]
-
-        d2o_ps = jnp.linalg.norm((p_ps - config.cir_obstacle_center), ord=2, axis=1)
-        penetration_depth_cir = d2o_ps - config.cir_obstacle_radius - robot_radius
-
-        if jnp.any(penetration_depth_cir) < 0:
-            worst_pen = jnp.max(penetration_depth_cir[penetration_depth_cir < 0])
-        else:
-            worst_pen = jnp.min(penetration_depth_cir)
-
-        # worst_pen = jnp.min(penetration_depth_cir)
-        # force = jnp.where(worst_pen >= 0, 0.0, -config.contact_spring_constant * worst_pen)
-        force_list_cir.append(worst_pen)
-
-    force_list_cir = onp.array(force_list_cir)
-
     force_list_poly = []
 
     for q in q_ts[::20]:
@@ -468,7 +403,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     force_list_poly = onp.array(force_list_poly)
 
     # Plot the motion and tau_ts
-    fig, axes = plt.subplots(6, 1, figsize=(8,10), sharex=True, num="Regulation example")
+    fig, axes = plt.subplots(5, 1, figsize=(8,10), sharex=True, num="Regulation example")
 
     # Plot strains
     # plot the reference strain evolution
@@ -492,8 +427,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         axes[3].plot(ts, tau_ts[:, i], label=f"Control Input {i+1}")
 
     safe_threshold = config.maximum_withhold_force
-    axes[4].plot(ts[::20], force_list_cir, linewidth=1.0, label=r"$\sigma_\mathrm{ax}^\mathrm{d}$")
-    axes[5].plot(ts[::20], force_list_poly, linewidth=1.0, label=r"$\sigma_\mathrm{ax}^\mathrm{d}$")
+    axes[4].plot(ts[::20], force_list_poly, linewidth=1.0, label=r"$\sigma_\mathrm{ax}^\mathrm{d}$")
 
     # axes[4].fill_between(
     # ts[::20],               # x values for the entire time vector
@@ -542,8 +476,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     axes[1].set_ylabel(r"Shear strain $\sigma_\mathrm{sh}$")
     axes[2].set_ylabel(r"Axial strain $\sigma_\mathrm{ax}$")
     axes[3].set_ylabel(r"Control inputs $\tau$")
-    axes[4].set_ylabel(r"Contact Force/Cir Newton")
-    axes[4].set_ylabel(r"Contact Force/Poly Newton")
+    axes[4].set_ylabel(r"Distance/Poly ")
     axes[4].set_xlabel("Time [s]")
 
     # Add legends and grid
@@ -564,8 +497,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     print("pos", pos)
     for q in q_ts[::20]:
         img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, num_segments, q,
-                          x_obs=config.cir_obstacle_center, 
-                          R_obs=config.cir_obstacle_radius, 
                           p_des = pos, 
                           poly_points=config.poly_obstacle_pos
                         )
