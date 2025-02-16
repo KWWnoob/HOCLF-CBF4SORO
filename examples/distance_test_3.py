@@ -11,9 +11,6 @@ import matplotlib.animation as animation
 
 # --- Define Kiwan SAT ---
 def Kiwan_SAT():
-    def project_points(points, axis):
-        projections = jnp.dot(points, axis)
-        return jnp.min(projections), jnp.max(projections)
 
     def get_normals(vertices):
         # Compute edge vectors and then compute normals by swapping components and negating one
@@ -34,27 +31,85 @@ def Kiwan_SAT():
         Cy = jnp.sum((y + y_next) * cross) / (6.0 * area)
         return jnp.array([Cx, Cy])
 
-    def compute_gap_along_centers(vertices1, vertices2):
-        # Compute the centroids for both polygons
+    def cross2D(a, b):
+        """
+        Compute the 2D cross product (scalar) for vectors a and b.
+        Supports vectorized inputs; a and b can have shape (..., 2).
+        """
+        return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+    def ray_polygon_intersection(O, d, vertices, eps=1e-8):
+        """
+        Compute the intersection of a ray starting at point O in direction d with a polygon's edges.
+        The polygon is defined by its vertices (assumed to be ordered).
+        
+        Parameters:
+        O: Origin of the ray, shape (2,).
+        d: Ray direction (unit vector), shape (2,).
+        vertices: Array of polygon vertices, shape (N, 2).
+        eps: Tolerance to check for near-zero denominators (parallelism).
+        
+        Returns:
+        The smallest positive t value (distance along the ray) for which the ray
+        intersects any of the polygon's edges. If no valid intersection is found, returns jnp.inf.
+        """
+        # Create edge endpoints: A is each vertex, and B is the next vertex (with wrapping)
+        A = vertices
+        B = jnp.concatenate([vertices[1:], vertices[:1]], axis=0)
+        BA = B - A  # Direction vectors for each edge
+
+        # Compute the denominator for the intersection formula for each edge
+        denom = cross2D(d, BA)
+
+        # Vector from ray origin O to each vertex A
+        A_minus_O = A - O
+
+        # Calculate ray parameter t and segment parameter u for each edge:
+        # The intersection is given by: O + t*d = A + u*(B - A)
+        t = cross2D(A_minus_O, BA) / denom
+        u = cross2D(A_minus_O, d) / denom
+
+        # Determine valid intersections:
+        # - Denom must be significantly non-zero.
+        # - t must be non-negative (intersection is along the ray).
+        # - u must be between 0 and 1 (intersection lies on the segment).
+        valid = (jnp.abs(denom) > eps) & (t >= 0) & (u >= 0) & (u <= 1)
+
+        # Replace invalid intersection t values with infinity so they are ignored when taking the minimum
+        t_valid = jnp.where(valid, t, jnp.inf)
+
+        # Return the smallest t value among all valid intersections
+        return jnp.min(t_valid)
+
+    def compute_gap_along_centers(vertices1, vertices2, eps=1e-8):
+        """
+        Compute the gap between two polygons along the line connecting their centroids:
+        
+        gap = (distance between centroids) - (radius of polygon1 in the given direction +
+                                                radius of polygon2 in the opposite direction)
+        
+        The "radius" of a polygon is determined by finding the intersection between a ray
+        emanating from the polygon's centroid and the polygon's boundary.
+        
+        Note: This function assumes that the centroid (computed by compute_polygon_centroid)
+        is located inside the polygon.
+        """
+        # Assume compute_polygon_centroid is defined elsewhere to compute the centroid (shape (2,))
         C1 = compute_polygon_centroid(vertices1)
         C2 = compute_polygon_centroid(vertices2)
         
-        # Compute the vector between the centroids and normalize it
+        # Compute the vector between centroids, its magnitude, and the unit direction vector d
         d_vec = C2 - C1
         d_norm = jnp.linalg.norm(d_vec)
         d = d_vec / d_norm
+
+        # Compute the "radius" for each polygon along the specified directions
+        # For polygon1, along the direction d; for polygon2, along the opposite direction -d.
+        r1 = ray_polygon_intersection(C1, d, vertices1, eps)
+        r2 = ray_polygon_intersection(C2, -d, vertices2, eps)
         
-        # Project vertices along the direction d for the first polygon
-        projections1 = jnp.dot(vertices1 - C1, d)
-        r1 = jnp.max(projections1)
-        
-        # Project vertices along the opposite direction for the second polygon
-        projections2 = jnp.dot(vertices2 - C2, -d)
-        r2 = jnp.max(projections2)
-        
-        # Calculate the gap between the polygons
+        # The gap is the center-to-center distance minus the sum of the two radii
         gap = d_norm - (r1 + r2)
-        
         return gap
 
     def compute_distance(robot_vertices, polygon_vertices):
@@ -313,5 +368,5 @@ def Regular_SAT():
 
 if __name__ == "__main__":
     # Uncomment the function you want to run:
-    # Kiwan_SAT()
-    Regular_SAT()
+    Kiwan_SAT()
+    # Regular_SAT()

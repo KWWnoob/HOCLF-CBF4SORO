@@ -1,5 +1,5 @@
 '''
-SAT MULTI AXIS_SoftMin VERSION
+SAT MULTI AXIS VERSION
 '''
 
 import csv
@@ -65,11 +65,7 @@ batched_forward_kinematics_fn = vmap(
     forward_kinematics_fn, in_axes=(None, None, 0)
 )
 
-
-# --- 定义前面提供的函数 ---
-def project_points(points, axis):
-    projections = jnp.dot(points, axis)
-    return jnp.min(projections), jnp.max(projections)
+# ---Polygon matters---
 
 def get_normals(vertices):
     edges = jnp.roll(vertices, -1, axis=0) - vertices
@@ -106,29 +102,20 @@ def compute_gap_along_centers(vertices1, vertices2):
     
     return gap
 
-def compute_distance(robot_vertices, polygon_vertices):
+def compute_distance(robot_vertices, polygon_vertices, epsilon = 1e-6):
     robot_normals = get_normals(robot_vertices)
     poly_normals  = get_normals(polygon_vertices)
     candidate_axes = jnp.concatenate([robot_normals, poly_normals], axis=0)
     
     proj_robot = robot_vertices @ candidate_axes.T
     proj_poly  = polygon_vertices @ candidate_axes.T
-
-    center_robot = compute_polygon_centroid(robot_vertices)
-    center_polygon = compute_polygon_centroid(polygon_vertices)
     
     min_R = jnp.min(proj_robot, axis=0)
     max_R = jnp.max(proj_robot, axis=0)
     min_P = jnp.min(proj_poly, axis=0)
     max_P = jnp.max(proj_poly, axis=0)
     
-    separation_left  = min_P - max_R  
-    separation_right = min_R - max_P  
-    
-    separated_mask = (max_R < min_P) | (max_P < min_R)
-    
-    sep_distances = jnp.where(max_R < min_P, separation_left,
-                       jnp.where(max_P < min_R, separation_right, jnp.inf))
+    separated_mask = (max_R < min_P - epsilon) | (max_P < min_R - epsilon)
     
     penetration = jnp.minimum(max_R, max_P) - jnp.maximum(min_R, min_P)
     
@@ -149,15 +136,14 @@ def compute_distance(robot_vertices, polygon_vertices):
     
     return overall_distance
 
-
 def segmented_polygon(current_point, next_point,forward_direction,robotic_radius):
     '''
     Feedin soft body consecutive centered positions and directions and formulate a rectangle body for detecting collisions
     '''
     d = jnp.array([jnp.cos(forward_direction+jnp.pi/2), jnp.sin(forward_direction+jnp.pi/2)])
+    # next_point = next_point + d * jnp.linalg.norm([next_point,current_point])*0.5
     n1 = jnp.array([-d[1], d[0]])
     n2 = jnp.array([d[1], -d[0]])
-    
     vertices = [current_point+n1*robotic_radius,
                 next_point+n1*robotic_radius,
                 next_point+n2*robotic_radius,
@@ -165,29 +151,76 @@ def segmented_polygon(current_point, next_point,forward_direction,robotic_radius
 
     return jnp.array(vertices)
 
-def circle_to_polygon(center: jnp.ndarray, radius: float, num_sides: int) -> jnp.ndarray:
+def minkowski_sum_convex(poly1, poly2):
     """
-    Approximates a circle by a regular polygon using a list comprehension.
+    Computes the Minkowski sum of two convex polygons.
     
-    Args:
-        center: A JAX array of shape (2,) representing the circle's center.
-        radius: The circle's radius.
-        num_sides: The number of vertices for the polygon approximation.
-        
+    Both poly1 and poly2 must be provided as jnp.array of shape (N,2) and 
+    (M,2) respectively, with vertices ordered counter-clockwise.
+    
     Returns:
-        A JAX array of shape (num_sides, 2) with each row as a vertex.
+        A jnp.array of shape (K,2) representing the Minkowski sum polygon.
     """
-    # Generate evenly spaced angles between 0 and 2π (endpoint excluded)
-    angles = jnp.linspace(0, 2 * jnp.pi, num_sides, endpoint=False)
+    # Convert to numpy arrays for ease of iteration (polygons are expected to be small)
+    poly1_np = jnp.array(poly1)
+    poly2_np = jnp.array(poly2)
     
-    # Compute each vertex using a list comprehension
-    vertices = jnp.array([
-        [center[0] + radius * jnp.cos(angle),
-         center[1] + radius * jnp.sin(angle)]
-        for angle in angles
-    ])
-    print(vertices)
-    return vertices
+    n = poly1_np.shape[0]
+    m = poly2_np.shape[0]
+    
+    # Find the indices of the vertices with the smallest x (and then y) for each polygon.
+    i0 = jnp.argmin(poly1_np[:, 0] + 1e-8*poly1_np[:, 1])
+    j0 = jnp.argmin(poly2_np[:, 0] + 1e-8*poly2_np[:, 1])
+    
+    i, j = i0, j0
+    result = []
+    
+    # Loop through each edge of both polygons
+    while True:
+        result.append(poly1_np[i] + poly2_np[j])
+        # Compute next indices (wrap-around)
+        next_i = (i + 1) % n
+        next_j = (j + 1) % m
+        
+        # Compute edge vectors
+        edge1 = poly1_np[next_i] - poly1_np[i]
+        edge2 = poly2_np[next_j] - poly2_np[j]
+        
+        # Compute cross product (z-component)
+        cross = edge1[0] * edge2[1] - edge1[1] * edge2[0]
+        
+        # Advance in the polygon(s) based on the cross product
+        if cross >= 0:
+            i = next_i
+        if cross <= 0:
+            j = next_j
+        
+        # Terminate when we've looped back to the start in both polygons
+        if i == i0 and j == j0:
+            break
+
+    return jnp.array(result)
+
+def round_polygon_corners_minkowski(poly, radius, num_circle_points=16):
+    """
+    Rounds the corners of a polygon using the Minkowski sum with a discretized circle.
+    
+    Parameters:
+        poly: jnp.array of shape (N, 2) representing the polygon vertices (assumed to be in CCW order).
+        radius: Rounding radius.
+        num_circle_points: Number of points used to approximate the circle.
+    
+    Returns:
+        A jnp.array representing the rounded polygon.
+    """
+    # Create a discretized circle (approximating a disk) as a convex polygon.
+    angles = jnp.linspace(0, 2 * jnp.pi, num_circle_points, endpoint=False)
+    circle = jnp.stack([radius * jnp.cos(angles), radius * jnp.sin(angles)], axis=1)
+    
+    # Compute the Minkowski sum of the original polygon and the circle.
+    # This gives the offset polygon with rounded corners.
+    rounded_poly = minkowski_sum_convex(poly, circle)
+    return rounded_poly
 
 def soft_robot_with_safety_contact_CBFCLF_example():
     
@@ -204,35 +237,30 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             '''Circular Obstacle Parameter'''
             self.cir_obstacle_center = jnp.array([-1e-2, 0.12]) # radius postion
             self.cir_obstacle_radius = 1e-2 # radius obstacle
-            self.num_sides = 10 # Adjust the number of sides for the polygon approximation of the circle.
-            
-            # Create a polygonal approximation of the circle.
-            self.cir_obstacle_shape = circle_to_polygon(self.cir_obstacle_center, self.cir_obstacle_radius, self.num_sides)
-            self.cir_obstacle_pos = self.cir_obstacle_shape + jnp.array([-0.03,0.03])
 
             '''Polygon Obstacle Parameter'''
             # self.poly_obstacle_shape = jnp.array([[0.0, 0.0],
             #                                     [0.0, 0.17],
             #                                     [0.03, 0.17],
             #                                     [0.03, 0.0]])
-            
 
             self.poly_obstacle_shape = jnp.array([[ 0.00000,  0.00851],
                                                     [-0.00809,  0.00263],
                                                     [-0.00500, -0.00688],
                                                     [ 0.00500, -0.00688],
                                                     [ 0.00809,  0.00264]])
+            # self.rounded_poly = round_polygon_corners_minkowski(self.poly_obstacle_shape, radius=0.005, num_circle_points=16)
             self.poly_obstacle_pos = self.poly_obstacle_shape + jnp.array([-0.04,0.07])
 
             '''Characteristic of robot'''
-            self.s_ps = jnp.linspace(0, robot_length * num_segments, 10 * num_segments) # segmented
+            self.s_ps = jnp.linspace(0, robot_length * num_segments, 20 * num_segments) # segmented
             self.q_des_arary = jnp.array([jnp.pi*4, 0.1, 0.1])
             multiplier = [1.1**m * self.q_des_arary for m in range(num_segments)]
             self.q_des = jnp.concatenate(multiplier)# destination
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 2000 #contact force model
-            self.maximum_withhold_force = 1
+            self.maximum_withhold_force = 0
 
             super().__init__(
                 n=6 * num_segments, # number of states
@@ -320,49 +348,62 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             
             # -------- Process the polygon obstacle --------
             obs_poly = self.poly_obstacle_pos  # Predefined polygon obstacle vertices
-            obs_circle = self.cir_obstacle_pos
 
-            # Consider segments between consecutive points (excluding the last point for segments)
-            current_points = p_ps[:]
+            # Define segments using adjacent points: (N-1, 2)
+            current_points = p_ps[:-1]
             next_points = p_ps[1:]
-            top_point  = p_ps[-1] + p_orientation[-1]*robot_radius
-            next_points = jnp.concatenate([next_points, top_point[None, :]], axis=0)
-            orientations = p_orientation[:]
-
-            # Define a function to compute penetration depth for a single segment against the polygon obstacle.
-            def segment_penetration(current, nxt, orientation):
-                # segmented_polygon should generate a polygon from the segment based on current, nxt, orientation, and robot_radius.
-                seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
-                # compute_distance should compute the penetration depth between the segment polygon and the obstacle polygon.
-                return compute_distance(seg_poly, obs_poly),compute_distance(seg_poly, obs_circle)
-
-            # Vectorize the penetration computation over all segments.
-            penetration_depth_poly, penetration_depth_cir = jax.vmap(segment_penetration)(current_points, next_points, orientations)
-            # jax.debug.print()
             
+            # 使用每个段的朝向：取前 N-1 个
+            segment_orientations = p_orientation[:-1]
+
+            # 计算法向量，形状 (N-1, 2)
+            normal_vectors = jnp.stack([
+                jnp.cos(segment_orientations + jnp.pi/2),
+                jnp.sin(segment_orientations + jnp.pi/2)
+            ], axis=1)
+            
+            # 计算每个段的长度，形状 (N-1, 1)
+            segment_lengths = jnp.linalg.norm(next_points - current_points, axis=1, keepdims=True)
+            
+            # 对 next_points 进行偏移（沿法向方向延伸一半的段长）
+            next_points = next_points + normal_vectors * segment_lengths * 0.5
+
+            # 定义计算单个段与多边形障碍物穿透深度的函数
+            def segment_penetration(current, nxt, orientation):
+                # segmented_polygon 根据 current, nxt, orientation 和 robot_radius 构造多边形
+                seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
+                # compute_distance 计算该多边形与障碍物多边形 obs_poly 的穿透深度
+                return compute_distance(seg_poly, obs_poly)
+
+            # 使用 jax.vmap 向量化计算所有段的穿透深度
+            penetration_depth_poly = jax.vmap(segment_penetration)(current_points, next_points, segment_orientations)
+            
+            # -------- Process the circular obstacle --------
+            d2o_ps = jnp.linalg.norm((p_ps - self.cir_obstacle_center), ord=2, axis=1)
+            penetration_depth_cir = d2o_ps - self.cir_obstacle_radius - robot_radius
+
             # -------- Compute the smooth force outputs --------
             contact_spring_constant = self.contact_spring_constant
             maximum_withhold_force = self.maximum_withhold_force
 
-            # Compute the smooth force for the circular obstacle using a sigmoid to smooth the transition.
+            # 计算圆形障碍物的平滑力（形状为 (N,)）
             force_smooth_cir = (penetration_depth_cir * contact_spring_constant + maximum_withhold_force) * \
                             (1 - jax.nn.sigmoid(20 * penetration_depth_cir))
             
-            # Compute the smooth force for the polygon obstacle in a similar way.
-            force_smooth_poly = (penetration_depth_poly * contact_spring_constant+ maximum_withhold_force) * \
+            # 计算多边形障碍物的平滑力（形状为 (N-1,)）
+            force_smooth_poly = (penetration_depth_poly * contact_spring_constant + maximum_withhold_force) * \
                                 (1 - jax.nn.sigmoid(20 * penetration_depth_poly)) 
             
-            # Combine the forces from both the circular and polygon obstacles.
-            # You may choose to add them instead of concatenating depending on the desired behavior.
-            force_smooth = jnp.concatenate([force_smooth_cir,force_smooth_poly], axis=0)
+            # 结合两种障碍物的力输出（注意：二者 shape 不同，如果想统一，可以考虑补齐或相加）
+            force_smooth = jnp.concatenate([force_smooth_cir, force_smooth_poly], axis=0)
             
             return force_smooth
             
         def alpha_2(self, h_2):
-            return h_2*10 #constant, increase for smaller affected zone
+            return h_2*160 #constant, increase for smaller affected zone
         
         def gamma_2(self, v_2):
-            return v_2*10
+            return v_2*160
 
     config = SoRoConfig()
     clf_cbf = CLFCBF.from_config(config)
@@ -426,21 +467,44 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
         p_ps = p[:, :2]
         p_orientation = p[:, 2]
-        current_points = p_ps[:-1]
-        next_points = p_ps[1:]
-        orientations = p_orientation[:-1]
 
-        def seg_pen(current, nxt, orientation):
-            seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
-            return compute_distance(seg_poly, config.cir_obstacle_pos)
-        seg_pen_vec = jax.vmap(seg_pen)(current_points, next_points, orientations)
-        worst_pen = jnp.min(seg_pen_vec)
+        d2o_ps = jnp.linalg.norm((p_ps - config.cir_obstacle_center), ord=2, axis=1)
+        penetration_depth_cir = d2o_ps - config.cir_obstacle_radius - robot_radius
+
+        if jnp.any(penetration_depth_cir) < 0:
+            worst_pen = jnp.max(penetration_depth_cir[penetration_depth_cir < 0])
+        else:
+            worst_pen = jnp.min(penetration_depth_cir)
+
+        # worst_pen = jnp.min(penetration_depth_cir)
         # force = jnp.where(worst_pen >= 0, 0.0, -config.contact_spring_constant * worst_pen)
         force_list_cir.append(worst_pen)
 
     force_list_cir = onp.array(force_list_cir)
 
     force_list_poly = []
+
+    # for q in q_ts[::20]:
+    #     p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
+    #     p_ps = p[:, :2]
+    #     p_orientation = p[:, 2]
+    #     current_points = p_ps[:-1]
+
+    #     next_points = p_ps[1:]
+    #     orientations = p_orientation[:-1]
+    #     def seg_pen(current, nxt, orientation):
+    #         seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
+    #         return compute_distance(seg_poly, config.poly_obstacle_pos)
+    #     seg_pen_vec = jax.vmap(seg_pen)(current_points, next_points, orientations)
+
+    #     if jnp.any(seg_pen_vec) < 0:
+    #         worst_pen = jnp.max(seg_pen_vec[seg_pen_vec < 0])
+    #     else:
+    #         worst_pen = jnp.min(seg_pen_vec)
+
+    #     # worst_pen = jnp.min(seg_pen_vec)
+    #     # force = jnp.where(worst_pen >= 0, 0.0, -config.contact_spring_constant * worst_pen)
+    #     force_list_poly.append(worst_pen)
 
     for q in q_ts[::20]:
         p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
@@ -454,7 +518,13 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
             return compute_distance(seg_poly, config.poly_obstacle_pos)
         seg_pen_vec = jax.vmap(seg_pen)(current_points, next_points, orientations)
-        worst_pen = jnp.min(seg_pen_vec)
+        
+        if jnp.any(seg_pen_vec) < 0:
+            worst_pen = 0
+        else:
+            worst_pen = 1
+
+        # worst_pen = jnp.min(seg_pen_vec)
         # force = jnp.where(worst_pen >= 0, 0.0, -config.contact_spring_constant * worst_pen)
         force_list_poly.append(worst_pen)
 
@@ -536,8 +606,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     axes[2].set_ylabel(r"Axial strain $\sigma_\mathrm{ax}$")
     axes[3].set_ylabel(r"Control inputs $\tau$")
     axes[4].set_ylabel(r"Contact Force/Cir Newton")
-    axes[4].set_ylabel(r"Contact Force/Poly Newton")
-    axes[4].set_xlabel("Time [s]")
+    axes[5].set_ylabel(r"Contact Force/Poly Newton")
+    axes[5].set_xlabel("Time [s]")
 
     # Add legends and grid
     for ax in axes:

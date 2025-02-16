@@ -165,40 +165,6 @@ def compute_gap_along_centers(vertices1, vertices2, eps=1e-8):
     gap = d_norm - (r1 + r2)
     return gap
 
-def compute_distance(robot_vertices, polygon_vertices, epsilon = 1e-6):
-    robot_normals = get_normals(robot_vertices)
-    poly_normals  = get_normals(polygon_vertices)
-    candidate_axes = jnp.concatenate([robot_normals, poly_normals], axis=0)
-    
-    proj_robot = robot_vertices @ candidate_axes.T
-    proj_poly  = polygon_vertices @ candidate_axes.T
-    
-    min_R = jnp.min(proj_robot, axis=0)
-    max_R = jnp.max(proj_robot, axis=0)
-    min_P = jnp.min(proj_poly, axis=0)
-    max_P = jnp.max(proj_poly, axis=0)
-    
-    separated_mask = (max_R < min_P - epsilon) | (max_P < min_R - epsilon)
-    
-    penetration = jnp.minimum(max_R, max_P) - jnp.maximum(min_R, min_P)
-    
-    def separated_case(_):
-        gap = compute_gap_along_centers(robot_vertices, polygon_vertices)
-        return gap
-    
-    def overlapping_case(_):
-        pen = -jnp.min(penetration)
-        return pen
-
-    overall_distance = jax.lax.cond(
-        jnp.any(separated_mask),
-        separated_case,
-        overlapping_case,
-        operand=None
-    )
-    
-    return overall_distance
-
 def segmented_polygon(current_point, next_point,forward_direction,robotic_radius):
     '''
     Feedin soft body consecutive centered positions and directions and formulate a rectangle body for detecting collisions
@@ -423,7 +389,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 # segmented_polygon should generate a polygon from the segment based on current, nxt, orientation, and robot_radius.
                 seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
                 # compute_distance should compute the penetration depth between the segment polygon and the obstacle polygon.
-                return compute_distance(seg_poly, obs_poly)
+                return compute_gap_along_centers(seg_poly, obs_poly)
 
             # Vectorize the penetration computation over all segments.
             penetration_depth_poly = jax.vmap(segment_penetration)(current_points, next_points, orientations)
@@ -568,7 +534,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         orientations = p_orientation[:-1]
         def seg_pen(current, nxt, orientation):
             seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
-            return compute_distance(seg_poly, config.poly_obstacle_pos)
+            return compute_gap_along_centers(seg_poly, config.poly_obstacle_pos)
         seg_pen_vec = jax.vmap(seg_pen)(current_points, next_points, orientations)
         
         def segment_penetration(current, nxt, orientation):
