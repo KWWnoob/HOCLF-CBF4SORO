@@ -65,10 +65,7 @@ batched_forward_kinematics_fn = vmap(
     forward_kinematics_fn, in_axes=(None, None, 0)
 )
 
-# --- 定义前面提供的函数 ---
-def project_points(points, axis):
-    projections = jnp.dot(points, axis)
-    return jnp.min(projections), jnp.max(projections)
+# ---Polygon matters---
 
 def get_normals(vertices):
     edges = jnp.roll(vertices, -1, axis=0) - vertices
@@ -87,47 +84,101 @@ def compute_polygon_centroid(vertices):
     Cy = jnp.sum((y + y_next) * cross) / (6.0 * area)
     return jnp.array([Cx, Cy])
 
-def compute_gap_along_centers(vertices1, vertices2):
+def cross2D(a, b):
+    """
+    Compute the 2D cross product (scalar) for vectors a and b.
+    Supports vectorized inputs; a and b can have shape (..., 2).
+    """
+    return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+def ray_polygon_intersection(O, d, vertices, eps=1e-8):
+    """
+    Compute the intersection of a ray starting at point O in direction d with a polygon's edges.
+    The polygon is defined by its vertices (assumed to be ordered).
+    
+    Parameters:
+      O: Origin of the ray, shape (2,).
+      d: Ray direction (unit vector), shape (2,).
+      vertices: Array of polygon vertices, shape (N, 2).
+      eps: Tolerance to check for near-zero denominators (parallelism).
+      
+    Returns:
+      The smallest positive t value (distance along the ray) for which the ray
+      intersects any of the polygon's edges. If no valid intersection is found, returns jnp.inf.
+    """
+    # Create edge endpoints: A is each vertex, and B is the next vertex (with wrapping)
+    A = vertices
+    B = jnp.concatenate([vertices[1:], vertices[:1]], axis=0)
+    BA = B - A  # Direction vectors for each edge
+
+    # Compute the denominator for the intersection formula for each edge
+    denom = cross2D(d, BA)
+
+    # Vector from ray origin O to each vertex A
+    A_minus_O = A - O
+
+    # Calculate ray parameter t and segment parameter u for each edge:
+    # The intersection is given by: O + t*d = A + u*(B - A)
+    t = cross2D(A_minus_O, BA) / denom
+    u = cross2D(A_minus_O, d) / denom
+
+    # Determine valid intersections:
+    # - Denom must be significantly non-zero.
+    # - t must be non-negative (intersection is along the ray).
+    # - u must be between 0 and 1 (intersection lies on the segment).
+    valid = (jnp.abs(denom) > eps) & (t >= 0) & (u >= 0) & (u <= 1)
+
+    # Replace invalid intersection t values with infinity so they are ignored when taking the minimum
+    t_valid = jnp.where(valid, t, jnp.inf)
+
+    # Return the smallest t value among all valid intersections
+    return jnp.min(t_valid)
+
+def compute_gap_along_centers(vertices1, vertices2, eps=1e-8):
+    """
+    Compute the gap between two polygons along the line connecting their centroids:
+    
+    gap = (distance between centroids) - (radius of polygon1 in the given direction +
+                                            radius of polygon2 in the opposite direction)
+    
+    The "radius" of a polygon is determined by finding the intersection between a ray
+    emanating from the polygon's centroid and the polygon's boundary.
+    
+    Note: This function assumes that the centroid (computed by compute_polygon_centroid)
+    is located inside the polygon.
+    """
+    # Assume compute_polygon_centroid is defined elsewhere to compute the centroid (shape (2,))
     C1 = compute_polygon_centroid(vertices1)
     C2 = compute_polygon_centroid(vertices2)
     
+    # Compute the vector between centroids, its magnitude, and the unit direction vector d
     d_vec = C2 - C1
     d_norm = jnp.linalg.norm(d_vec)
     d = d_vec / d_norm
+
+    # Compute the "radius" for each polygon along the specified directions
+    # For polygon1, along the direction d; for polygon2, along the opposite direction -d.
+    r1 = ray_polygon_intersection(C1, d, vertices1, eps)
+    r2 = ray_polygon_intersection(C2, -d, vertices2, eps)
     
-    projections1 = jnp.dot(vertices1 - C1, d)
-    r1 = jnp.max(projections1)
-    
-    projections2 = jnp.dot(vertices2 - C2, -d)
-    r2 = jnp.max(projections2)
-    
+    # The gap is the center-to-center distance minus the sum of the two radii
     gap = d_norm - (r1 + r2)
-    
     return gap
 
-def compute_distance(robot_vertices, polygon_vertices):
+def compute_distance(robot_vertices, polygon_vertices, epsilon = 1e-6):
     robot_normals = get_normals(robot_vertices)
     poly_normals  = get_normals(polygon_vertices)
     candidate_axes = jnp.concatenate([robot_normals, poly_normals], axis=0)
     
     proj_robot = robot_vertices @ candidate_axes.T
     proj_poly  = polygon_vertices @ candidate_axes.T
-
-    center_robot = compute_polygon_centroid(robot_vertices)
-    center_polygon = compute_polygon_centroid(polygon_vertices)
     
     min_R = jnp.min(proj_robot, axis=0)
     max_R = jnp.max(proj_robot, axis=0)
     min_P = jnp.min(proj_poly, axis=0)
     max_P = jnp.max(proj_poly, axis=0)
     
-    separation_left  = min_P - max_R  
-    separation_right = min_R - max_P  
-    
-    separated_mask = (max_R < min_P) | (max_P < min_R)
-    
-    sep_distances = jnp.where(max_R < min_P, separation_left,
-                       jnp.where(max_P < min_R, separation_right, jnp.inf))
+    separated_mask = (max_R < min_P - epsilon) | (max_P < min_R - epsilon)
     
     penetration = jnp.minimum(max_R, max_P) - jnp.maximum(min_R, min_P)
     
@@ -155,13 +206,49 @@ def segmented_polygon(current_point, next_point,forward_direction,robotic_radius
     d = jnp.array([jnp.cos(forward_direction+jnp.pi/2), jnp.sin(forward_direction+jnp.pi/2)])
     n1 = jnp.array([-d[1], d[0]])
     n2 = jnp.array([d[1], -d[0]])
-    
     vertices = [current_point+n1*robotic_radius,
                 next_point+n1*robotic_radius,
                 next_point+n2*robotic_radius,
                 current_point+n2*robotic_radius]
 
     return jnp.array(vertices)
+
+def half_circle_to_polygon(center, forward_direction, radius, num_arc_points=10):
+    """
+    Create a convex polygon that approximates a half circle using JAX.
+    
+    Parameters:
+      center: jnp.array with shape (2,) representing the center of the half circle.
+      d: jnp.array with shape (2,) representing the apex direction of the half circle 
+         (should be normalized).
+      radius: scalar, the radius of the half circle.
+      num_arc_points: number of points to sample along the arc (excluding the chord endpoints 
+                      if desired). The total number of points returned will be num_arc_points + 2.
+    
+    Returns:
+      polygon: jnp.array of shape (N, 2) with vertices of the polygon, ordered counter-clockwise.
+               The polygon includes the arc points, and the chord between the endpoints closes
+               the half circle.
+    """
+    # Compute the angle of the apex direction using arctan2.
+    apex_angle = forward_direction+jnp.pi/2
+    
+    # The half circle spans π radians, centered on the forward direction.
+    start_angle = apex_angle - jnp.pi / 2
+    end_angle   = apex_angle + jnp.pi / 2
+    
+    # Generate linearly spaced angles between the start and end angles.
+    # This produces points in increasing order (counter-clockwise).
+    angles = jnp.linspace(start_angle, end_angle, num_arc_points + 2)
+    
+    # Compute the coordinates of the arc points using the circle's parametric equations.
+    arc_points = center + radius * jnp.stack((jnp.cos(angles), jnp.sin(angles)), axis=1)
+    
+    # Return the vertices of the polygon.
+    # When these vertices are connected in order (and the last vertex is connected back to the first),
+    # the shape is a convex polygon approximating the half circle with a straight chord closing the shape.
+    return arc_points
+
 
 def soft_robot_with_safety_contact_CBFCLF_example():
     
@@ -182,7 +269,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                                                 [robot_length*num_segments, 0.0]])
             
 
-            self.poly_obstacle_pos = self.poly_obstacle_shape + jnp.array([-0.18,0.02])
+            self.poly_obstacle_pos = self.poly_obstacle_shape/4 + jnp.array([-0.08,0.04])
 
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 10 * num_segments) # segmented
@@ -282,23 +369,21 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             obs_poly = self.poly_obstacle_pos  # Predefined polygon obstacle vertices
 
             # Consider segments between consecutive points (excluding the last point for segments)
-            current_points = p_ps[:]
+            current_points = p_ps[:-1]
             next_points = p_ps[1:]
-            top_point  = p_ps[-1] + p_orientation[-1]*robot_radius
-            next_points = jnp.concatenate([next_points, top_point[None, :]], axis=0)
-            orientations = p_orientation[:]
+            orientations = p_orientation[:-1]
 
             # Define a function to compute penetration depth for a single segment against the polygon obstacle.
             def segment_penetration(current, nxt, orientation):
                 # segmented_polygon should generate a polygon from the segment based on current, nxt, orientation, and robot_radius.
                 seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
+                seg_poly = jnp.concatenate([seg_poly, half_circle_to_polygon(p_ps[-1,:2],p_orientation[-1],robot_radius)]) #add the half circle in the end
                 # compute_distance should compute the penetration depth between the segment polygon and the obstacle polygon.
                 return compute_distance(seg_poly, obs_poly)
 
             # Vectorize the penetration computation over all segments.
             penetration_depth_poly = jax.vmap(segment_penetration)(current_points, next_points, orientations)
             # jax.debug.print()
-            
 
             # -------- Compute the smooth force outputs --------
             contact_spring_constant = self.contact_spring_constant
@@ -306,11 +391,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             
             # Compute the smooth force for the polygon obstacle in a similar way.
             force_smooth_poly = (penetration_depth_poly * contact_spring_constant+ maximum_withhold_force) * \
-                                (1 - jax.nn.sigmoid(20 * penetration_depth_poly)) 
+                                (1 - jax.nn.sigmoid(5 * penetration_depth_poly)) 
+            force_smooth = penetration_depth_poly * contact_spring_constant+ maximum_withhold_force
             
             # Combine the forces from both the circular and polygon obstacles.
             # You may choose to add them instead of concatenating depending on the desired behavior.
-            force_smooth = jnp.concatenate([force_smooth_poly], axis=0)
+            force_smooth = jnp.concatenate([penetration_depth_poly], axis=0)
             
             return force_smooth
             

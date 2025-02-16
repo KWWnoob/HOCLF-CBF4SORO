@@ -213,6 +213,43 @@ def segmented_polygon(current_point, next_point,forward_direction,robotic_radius
 
     return jnp.array(vertices)
 
+def half_circle_to_polygon(center, forward_direction, radius, num_arc_points=8):
+    """
+    Create a convex polygon that approximates a half circle using JAX.
+    
+    Parameters:
+      center: jnp.array with shape (2,) representing the center of the half circle.
+      d: jnp.array with shape (2,) representing the apex direction of the half circle 
+         (should be normalized).
+      radius: scalar, the radius of the half circle.
+      num_arc_points: number of points to sample along the arc (excluding the chord endpoints 
+                      if desired). The total number of points returned will be num_arc_points + 2.
+    
+    Returns:
+      polygon: jnp.array of shape (N, 2) with vertices of the polygon, ordered counter-clockwise.
+               The polygon includes the arc points, and the chord between the endpoints closes
+               the half circle.
+    """
+    # Compute the angle of the apex direction using arctan2.
+    apex_angle = forward_direction+jnp.pi/2
+    
+    # The half circle spans π radians, centered on the forward direction.
+    start_angle = apex_angle - jnp.pi / 2
+    end_angle   = apex_angle + jnp.pi / 2
+    
+    # Generate linearly spaced angles between the start and end angles.
+    # This produces points in increasing order (counter-clockwise).
+    angles = jnp.linspace(start_angle, end_angle, num_arc_points + 2)
+    
+    # Compute the coordinates of the arc points using the circle's parametric equations.
+    arc_points = center + radius * jnp.stack((jnp.cos(angles), jnp.sin(angles)), axis=1)
+    
+    # Return the vertices of the polygon.
+    # When these vertices are connected in order (and the last vertex is connected back to the first),
+    # the shape is a convex polygon approximating the half circle with a straight chord closing the shape.
+    return arc_points
+
+
 def minkowski_sum_convex(poly1, poly2):
     """
     Computes the Minkowski sum of two convex polygons.
@@ -322,7 +359,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 2000 #contact force model
-            self.maximum_withhold_force = 0
+            self.maximum_withhold_force = 20
 
             super().__init__(
                 n=6 * num_segments, # number of states
@@ -422,8 +459,10 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             def segment_penetration(current, nxt, orientation):
                 # segmented_polygon should generate a polygon from the segment based on current, nxt, orientation, and robot_radius.
                 seg_poly = segmented_polygon(current, nxt, orientation, robot_radius)
+                seg_poly = jnp.concatenate([seg_poly, half_circle_to_polygon(p_ps[-1,:2],p_orientation[-1],robot_radius)]) #add the half circle in the end
                 # compute_distance should compute the penetration depth between the segment polygon and the obstacle polygon.
                 return compute_distance(seg_poly, obs_poly)
+
 
             # Vectorize the penetration computation over all segments.
             penetration_depth_poly = jax.vmap(segment_penetration)(current_points, next_points, orientations)
