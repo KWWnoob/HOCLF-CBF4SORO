@@ -19,7 +19,7 @@ def draw_image(
     poly_points: Optional[Union[Array, list]] = None,  # supports list or single polygon
     img_width: int = 700,
     img_height: int = 700,
-    num_points: int = 50, # original:50
+    num_points: int = 10, # original:50
     flag: Optional[int] = 0  # New parameter for collision flag
 ) -> onp.ndarray:
     """
@@ -128,7 +128,6 @@ def draw_image(
 
     if p_des is not None:
         p_des_np = onp.array(p_des)
-        print(p_des_np)
 
         if p_des_np.ndim == 2:
             num_pd = p_des_np.shape[0]
@@ -154,7 +153,6 @@ def draw_image(
                         (uv_des[0], uv_des[1] - cross_size),
                         (uv_des[0], uv_des[1] + cross_size),
                         color, 2)
-                print("Desired position:", pd)
 
         else:
             uv_des = onp.array(curve_origin + p_des_np * ppm, dtype=onp.int32)
@@ -168,7 +166,6 @@ def draw_image(
                     (uv_des[0], uv_des[1] - cross_size),
                     (uv_des[0], uv_des[1] + cross_size),
                     (0, 0, 255), 2)
-            print("Desired position:", p_des_np)
 
     if poly_points is not None:
         # Transfering jnp array to onp

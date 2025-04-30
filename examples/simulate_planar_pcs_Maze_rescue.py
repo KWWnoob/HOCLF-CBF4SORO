@@ -28,7 +28,7 @@ outputs_dir = Path("outputs") / "planar_pcs_simulation"
 outputs_dir.mkdir(parents=True, exist_ok=True)
 
 # load symbolic expressions
-num_segments = 2
+num_segments = 1
 # filepath to symbolic expressions
 sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"planar_pcs_ns-{num_segments}.dill"
 
@@ -319,7 +319,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.p_des_2 = jnp.array([0.18, 0.40234353, 0])
 
             self.p_des = jnp.stack([self.p_des_1,self.p_des_2])
-            print(self.p_des)
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 2000 #contact force model
@@ -580,10 +579,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     q_ts, q_d_ts = jnp.split(sol.ys, 2, axis=1)
 
     q_des_ts = jnp.tile(q_des, (ts.shape[0], 1))
-    print("q_des_ts", q_des_ts.shape)
     # Compute tau_ts using vmap
     tau_ts = vmap(clf_cbf.controller)(sol.ys, q_des_ts) #TODO: understand this
-    print("tau_ts", tau_ts.shape)
 
     flag_list = []     
     for q in q_ts[::20]:
@@ -657,7 +654,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     pos1 = config.p_des[0,:2]
     pos2 = config.p_des[1,:2]
     pos = jnp.stack([pos1,pos2])
-    print("pos", pos2)
 
     batched_segment_robot = jax.vmap(segmented_polygon,in_axes=(0, 0, 0, None))
 

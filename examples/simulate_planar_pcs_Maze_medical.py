@@ -319,7 +319,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.obs_center = jnp.stack([self.circle_obs_1_pos, self.circle_obs_2_pos])
             self.obs_radius = jnp.stack([self.circle_obs_1_radius, self.circle_obs_2_radius])
 
-            '''Characteristic of robot'''
+            '''destination of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 20 * num_segments) # segmented
             self.q_des_arary_1 = jnp.array([-jnp.pi*1.8, 0.3, 0.4])
             # self.q_des_array_0 = jnp.array([-jnp.pi*1.8, 0.3, 0.4])/2
@@ -327,11 +327,17 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # self.q_des_arary_2 = jnp.array([jnp.pi*2, 0.3, 0.4])/2
             self.q_des = jnp.concatenate([self.q_des_arary_3])# destination
 
-            self.p_des_1 = jnp.array([0.05951909*1, 0.15234353*0.9, -jnp.pi*1.8*robot_length])
-            self.p_des_2 = jnp.array([0.05951909*3, 0.15234353*2.3,-jnp.pi/2 ])
+            self.p_des_1_1 = jnp.array([0.05951909*1, 0.15234353*0.9, -jnp.pi*1.8*robot_length])
+            self.p_des_2_1 = jnp.array([0.05951909*3, 0.15234353*2.3,-jnp.pi/2 ])
 
-            self.p_des = jnp.stack([self.p_des_1,self.p_des_2])
-            print(self.p_des)
+            self.p_des_1_2 = self.p_des_1_1 * 1.2
+            self.p_des_2_2 = self.p_des_1_2 * 1.2
+
+            self.p_des_1 = jnp.stack([self.p_des_1_1,self.p_des_2_1])
+            self.p_des_2 = jnp.stack([self.p_des_1_2,self.p_des_2_1])
+            
+            self.num_waypoints = 2
+            print(self.p_des_1, self.p_des_2)
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 2000 #contact force model
@@ -389,7 +395,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # Compute forward kinematics for the desired configuration.
             # p_des = batched_forward_kinematics_fn(self.robot_params, self.q_des, self.s_ps)
             # p_des_list = [p_des[i, :2] for i in index]
-            p_des_list = [self.p_des[i, :] for i in range(num_segments)]
+            p_des_list_1 = [self.p_des_1[i, :] for i in range(num_segments)]
+            p_des_list_2 = [self.p_des_2[i, :] for i in range(num_segments)]
 
             p_list = jnp.array(p_list)
             p_des_list = jnp.array(p_des_list)
@@ -403,6 +410,52 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # Option: Return the errors as a single vector by concatenating the two.
             # V_total = jnp.concatenate(error)
             return error   
+        
+        def V_2(self, z, z_des, switch_flag) -> tuple[jnp.ndarray, jnp.ndarray]:
+            # Split state into positions (q) and velocities (q_d)
+            q, q_d = jnp.split(z, 2)
+            
+            # Compute forward kinematics for the current configuration.
+            p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
+            print(p.shape)
+            # Determine indices in a vectorized way.
+            num_points = p.shape[0]
+            # Compute indices: equivalent to
+            # [num_points * (i+1)//num_segments - 1 for i in range(num_segments)]
+            indices = (jnp.arange(1, num_segments+1) * num_points // num_segments) - 1
+            # p_list is now a (num_segments, D) array.
+            p_list = p[indices, :]
+            
+            # Get the two desired position lists.
+            # Assume self.p_des_1 and self.p_des_2 are JAX arrays of shape (num_segments, D).
+            p_des_list_1 = self.p_des_1[:num_segments, :]
+            p_des_list_2 = self.p_des_2[:num_segments, :]
+            
+            # Compute the overall error (Frobenius norm using the first two coordinates for each segment).
+            error_primary = jnp.linalg.norm(p_list[:, :2] - p_des_list_1[:, :2])
+            
+            # Define a threshold.
+            threshold = 0.05
+            
+            # Update the switch flag in a pure, vectorized manner:
+            # Once error_primary is below threshold, new_switch_flag becomes True and stays True.
+            new_switch_flag = jnp.logical_or(switch_flag, error_primary < threshold)
+            
+            # Permanently select the desired configuration based on the flag.
+            # new_switch_flag is a scalar boolean JAX array.
+            p_des_list_to_use = jnp.where(new_switch_flag, p_des_list_2, p_des_list_1)
+            
+            # Compute the tracking errors.
+            # For the "middle" point, use the first two coordinates.
+            error_middle = jnp.sqrt((p_list[0, :2] - p_des_list_to_use[0, :2])**2)
+            # For the "tip" point, use all coordinates and scale the error by 10.
+            error_tip = jnp.sqrt((p_list[1, :] - p_des_list_to_use[1, :])**2) * 10
+            
+            # Concatenate the errors into one vector.
+            error = jnp.concatenate([error_tip, error_middle]).reshape(-1)
+            
+            return error, new_switch_flag
+
         
         def h_2(self, z) -> jnp.ndarray:
             """

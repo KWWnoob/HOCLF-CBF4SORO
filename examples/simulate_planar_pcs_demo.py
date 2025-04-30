@@ -1,9 +1,6 @@
 import diffrax as dx
 from functools import partial
 import jax
-from cbfpy import CBF, CBFConfig
-from cbfpy.cbfs.clf_cbf import CLFCBF
-from cbfpy.config.clf_cbf_config import CLFCBFConfig
 
 jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
@@ -35,7 +32,7 @@ robot_params = {
     "l": 1e-1 * jnp.ones((num_segments,)),
     "r": 2e-2 * jnp.ones((num_segments,)),
     "rho": rho,
-    "g": jnp.array([0.0, 9.81]),
+    "g": jnp.array([0.0, 0.0]), # used to be 0，9.81
     "E": 2e3 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
     "G": 1e3 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
 }
@@ -186,8 +183,15 @@ def soft_robot_regulation_example():
     q_ts, q_d_ts = jnp.split(sol.ys, 2, axis=1)
     q_des_ts = jnp.tile(q_des, (len(ts), 1))
 
-    # plot the motion
-    fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True, num="Regulation example")
+     # --- Record control inputs (tau) post-simulation ---
+    u_list = []
+    for t, y in zip(ts, sol.ys):
+        u = control_policy_fn(t, y, q_des)
+        u_list.append(u)
+    u_ts = jnp.stack(u_list, axis=0)
+
+    # --- Plot the state trajectories ---
+    fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharex=True)
     axes[0].plot(ts, q_ts[:, 0])
     axes[1].plot(ts, q_ts[:, 1])
     axes[2].plot(ts, q_ts[:, 2])
@@ -200,10 +204,22 @@ def soft_robot_regulation_example():
     plt.tight_layout()
     plt.show()
 
+    # --- Plot the control input over time ---
+    plt.figure(figsize=(10, 4))
+    for i in range(u_ts.shape[1]):
+        plt.plot(ts, u_ts[:, i], label=f"$u[{i}]$")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Control Input $\\tau$")
+    plt.title("Control Input over Time")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
     # animate the motion
     img_ts = []
     for q in q_ts[::20]:
-        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, q)
+        img = draw_image(batched_forward_kinematics_fn, auxiliary_fns, robot_params, 2, q)
         img_ts.append(img)
     img_ts = onp.stack(img_ts, axis=0)
     animate_images_cv2(

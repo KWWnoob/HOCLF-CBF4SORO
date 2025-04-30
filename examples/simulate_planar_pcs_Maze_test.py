@@ -232,6 +232,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # self.q_des_arary_2 = jnp.array([jnp.pi*2, 0.3, 0.4])/2
             self.q_des = jnp.concatenate([self.q_des_arary_1,self.q_des_arary_3])# destination
 
+
             '''Contact model Parameter'''
             self.contact_spring_constant = 2000 #contact force model
             self.maximum_withhold_force = 0
