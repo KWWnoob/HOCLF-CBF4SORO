@@ -668,5 +668,64 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         onp.array(ts[::20]), img_ts, outputs_dir / "planar_pcs_safe_closed_loop_simulation.mp4"
     )
 
+    z_d = p_des_all[-1]
+    sampled_ts = ts[::20]
+    sampled_ys = ys[::20]
+
+    h_list = []        # h(z)[-1]
+    h_min_list = []    # min(h(z))
+    V_list = []        # V(z)
+
+    # 用于保留未归一的原始数据
+    raw_h_tail_list = []
+    raw_h_min_list = []
+    raw_V_list = []
+
+    for z in sampled_ys:
+        h_vec = config.h_2(z)
+        h_tail = float(h_vec[-1])
+        h_min = float(h_vec.min())
+        V_val = float(config.V_2(z, z_d).sum())
+
+        h_list.append(h_tail)
+        h_min_list.append(h_min)
+        V_list.append(V_val)
+
+        raw_h_tail_list.append(h_tail)
+        raw_h_min_list.append(h_min)
+        raw_V_list.append(V_val)
+
+    # 转换为 numpy
+    times_np = onp.array(sampled_ts)
+    h_np = onp.array(h_list)
+    hmin_np = onp.array(h_min_list)
+    V_np = onp.array(V_list)
+
+    # 归一化
+    eps = 1e-8
+    h_norm = (h_np - h_np.min()) / (h_np.max() - h_np.min() + eps)
+    hmin_norm = (hmin_np - hmin_np.min()) / (hmin_np.max() - hmin_np.min() + eps)
+    V_norm = (V_np - V_np.min()) / (V_np.max() - V_np.min() + eps)
+
+    # 画图（不指定颜色）
+    plt.figure(figsize=(6, 3))
+    plt.plot(times_np, V_norm, label="Normalized HOCLF")
+    plt.plot(times_np, h_norm, label="Normalized tip HOCBF")
+    plt.plot(times_np, hmin_norm, label="Normalized min HOCBF")
+
+    plt.xlabel("Time (s)")
+    plt.ylabel("Normalized value")
+    plt.legend(loc='upper right')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.rcParams['pdf.fonttype'] = 42
+    plt.savefig(outputs_dir / "CLF_CBF_all.pdf", dpi=300)
+    plt.show()
+
+    # 保存 CSV（原始值，不用 pandas）
+    csv_data = onp.stack([times_np, h_np, hmin_np, V_np], axis=1)
+    csv_path = outputs_dir / "CLF_CBF_values.csv"
+    onp.savetxt(csv_path, csv_data, delimiter=",", header="time,h_tail,h_min,V", comments='')
+
 if __name__ == "__main__":
     soft_robot_with_safety_contact_CBFCLF_example()

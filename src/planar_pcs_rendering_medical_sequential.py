@@ -181,21 +181,21 @@ def draw_image(
     '''
     Visualizing
     '''
-    # # draw the segment robot
-    # robot_tip_pix = onp.array(robot_tip * ppm, dtype=onp.int32) + curve_origin
-    # robot_tip_pix[:, 1] = h - robot_tip_pix[:, 1]
-    # robot_tip_color = [255 , 0, 0]
-    # cv2.fillPoly(img, [robot_tip_pix], color=robot_tip_color)
+    # draw the segment robot
+    robot_tip_pix = onp.array(robot_tip * ppm, dtype=onp.int32) + curve_origin
+    robot_tip_pix[:, 1] = h - robot_tip_pix[:, 1]
+    robot_tip_color = [255 , 0, 0]
+    cv2.fillPoly(img, [robot_tip_pix], color=robot_tip_color)
 
-    # segment_poly_color = (0, 255, 0)  # For instance, green
-    # for poly in robot_poly:
-    #     # Convert each polygon to pixel coordinates
-    #     poly_pix = onp.array(poly * ppm, dtype=onp.int32) + curve_origin
-    #     poly_pix[:, 1] = h - poly_pix[:, 1]
-    #     # You can choose to fill or outline; here we fill the polygon:
-    #     # cv2.fillPoly(img, [poly_pix], color=segment_poly_color)
-    #     # Alternatively, to draw an outline use:
-    #     cv2.polylines(img, [poly_pix], isClosed=True, color=segment_poly_color, thickness=1)
+    segment_poly_color = (0, 255, 0)  # For instance, green
+    for poly in robot_poly:
+        # Convert each polygon to pixel coordinates
+        poly_pix = onp.array(poly * ppm, dtype=onp.int32) + curve_origin
+        poly_pix[:, 1] = h - poly_pix[:, 1]
+        # You can choose to fill or outline; here we fill the polygon:
+        # cv2.fillPoly(img, [poly_pix], color=segment_poly_color)
+        # Alternatively, to draw an outline use:
+        cv2.polylines(img, [poly_pix], isClosed=True, color=segment_poly_color, thickness=1)
 
     if p_des_all is not None:
 

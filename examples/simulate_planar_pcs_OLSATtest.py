@@ -99,6 +99,34 @@ def compute_distance(
     
     return h, separation_flag
 
+@jax.jit
+def compute_distance(robot_vertices, polygon_vertices, alpha=100):
+    rv = robot_vertices
+    
+    def get_normals(verts):
+        edges = jnp.roll(verts, -1, axis=0) - verts
+        normals = jnp.stack([-edges[:, 1], edges[:, 0]], axis=1)
+        return normals / jnp.linalg.norm(normals, axis=1, keepdims=True)
+    
+    Rn = get_normals(rv)
+    Pn = get_normals(polygon_vertices)
+    axes = jnp.vstack((Rn, Pn))  # |𝓐| = number of axes
+    proj_R = rv @ axes.T
+    proj_P = polygon_vertices @ axes.T
+    R_min, R_max = proj_R.min(axis=0), proj_R.max(axis=0)
+    P_min, P_max = proj_P.min(axis=0), proj_P.max(axis=0)
+    
+    gaps = jnp.hstack((P_min - R_max, R_min - P_max))  # all signed separations
+    h_olsat = (1.0 / alpha) * logsumexp(alpha * gaps)
+
+    # Add error bound term: log(2|𝓐|) / alpha
+    error_bound = jnp.log(2 * axes.shape[0]) / alpha 
+    h = h_olsat - error_bound
+    separation_flag = jnp.where(h > 0, 1, 0)
+    
+    return h, separation_flag
+
+
 def segmented_polygon(current_point, next_point, forward_direction, robotic_radius):
     '''
     Feed in soft body consecutive centered positions and directions and formulate a rectangular body for detecting collisions.
@@ -271,7 +299,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             self.poly_obstacle_pos_6 = self.poly_obstacle_pos_4[2,:] + self.poly_obstacle_shape_1
 
-            self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_1, self.poly_obstacle_pos_2])
+            self.poly_obstacle_pos = []
 
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 20 * num_segments) # segmented
@@ -428,7 +456,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         
             # force_smooth = jnp.concatenate([penetration_depth_poly], axis=0)
             
-            return contact_force
+            return penetration_depth_poly
                     
         def alpha_2(self, h_2):
             return h_2*5 #constant, increase for smaller affected zone
@@ -603,7 +631,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             p_des=pos,
             poly_points=config.poly_obstacle_pos,
             flag=None,  # explicitly disable flag indicator
-            contact_points=frame_contact_points  # pass collision points
+            contact_points=None  # pass collision points
         )
         img_ts.append(img)
 

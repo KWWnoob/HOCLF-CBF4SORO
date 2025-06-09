@@ -605,17 +605,13 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     sim_dt = 5e-4 # simulation dt used by the solver
 
     def simulation_step(carry, _):
-        """
-        Performs one simulation step.
-        
-        carry: a tuple (t, y_current, current_flag)
-        _    : placeholder for scan (unused)
-        """
         t, y_current, current_index = carry
-        # Choose z_des based on current_index
         current_z_des = p_des_all[current_index]
 
-        # Integrate the ODE from t to t + dt
+        # === Compute control input ===
+        u = clf_cbf.controller(y_current, current_z_des)
+
+        # === Integrate the ODE ===
         sol = dx.diffeqsolve(
             dx.ODETerm(closed_loop_ode_fn),
             dx.Tsit5(),
@@ -625,64 +621,86 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             y0=y_current,
             args=current_z_des,
         )
-        
         y_next = sol.ys[-1]
-
-        new_index = 0
-        
-        # Update time
         t_next = t + dt
+        new_index = 0
 
-        # New carry for next iteration
+        # Output now includes u
         new_carry = (t_next, y_next, new_index)
-        # Output for storage (time and state)
-        output = (t_next, y_next)
+        output = (t_next, y_next, u)
         return new_carry, output
 
     @jax.jit
     def run_simulation():
-        # Determine number of steps
         num_steps = int((tf - t0) / dt)
-        
-        # Initial carry state: time, initial state, and index (starting at 0)
         init_carry = (t0, y0, 0)
-        
-        # Use jax.lax.scan to perform the simulation steps
-        final_carry, (ts, ys) = jax.lax.scan(simulation_step, init_carry, None, length=num_steps)
-        return ts, ys
+        final_carry, (ts, ys, us) = jax.lax.scan(simulation_step, init_carry, None, length=num_steps)
+        return ts, ys, us
 
     # Run the simulation
-    ts, ys = run_simulation()
-        
-    # after ts, ys = run_simulation()
 
-    # 1. reference
+    ts, ys, us = run_simulation()
+
+    # Reference target state
     z_des = p_des_all[0]
 
-    # 2. make a vectorized evaluator for V
+    # Vectorized evaluators
     V_fn = jax.vmap(lambda y: config.V(y, z_des))
     h_fn = jax.vmap(lambda y: config.h_2(y)[-1])
+    u_fn = jax.vmap(lambda y: jnp.linalg.norm(clf_cbf.controller(y, z_des)))
 
-    # 3. compute the time series
-    V_ts = V_fn(ys)   # shape: (N_steps,)
-    h_ts = h_fn(ys)   # shape: (N_steps,)
+    # Compute time series
+    V_ts = V_fn(ys)
+    h_ts = h_fn(ys)
+    u_ts = u_fn(ys)
 
-    # 4. convert to NumPy
+    # Convert to NumPy and normalize
     import numpy as onp
     ts_np  = onp.array(ts)
+
     V_np   = onp.array(V_ts)
-    V_np = V_np/V_np[0]
-    h_np = onp.array(h_ts)
-    h_np = h_np / onp.abs(h_np).max()
-    # Convert ts to NumPy once (you already did this for V)
-    plt.figure()
-    plt.plot(ts_np, V_np, label=r'$V(x(t))$')
-    plt.plot(ts_np, h_np, label=r'$h_2(x(t))$')
-    plt.xlabel('Time [s]')
-    plt.ylabel('CBF and CLF Value')
-    plt.legend()
+    V_np   = V_np / V_np[0]  # Normalize to 1 at t=0
+
+    h_np   = onp.array(h_ts)
+    h_np   = h_np / onp.abs(h_np).max()  # Normalize by peak absolute value
+
+    u_np   = onp.array(u_ts)
+    u_np   = u_np / onp.abs(u_np).max()  # Normalize control input norm
+
+    # --------------------
+    # Plot: CLF and CBF
+    # --------------------
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(6, 3))
+    plt.plot(ts_np, V_np, label="Normalized HOCBF: Contact Establishment", linewidth=2)
+    plt.plot(ts_np, h_np, label="Normalized HOCLF: Object Regulation", linewidth=2)
+    plt.axvspan(0, 0.4, color='blue', alpha=0.3)
+    plt.axvspan(5.5, 5.9, color='blue', alpha=0.3)
+    plt.xlabel("Time [s]")
+    plt.ylabel("Normalized HOCBF/HOCLF value")
+    plt.legend(fontsize=12)
     plt.grid(True)
+    plt.tight_layout()
+    plt.rcParams['pdf.fonttype'] = 42
+    plt.savefig(outputs_dir / "normalized_HOCBF_HOCLF.pdf", dpi=300)
     plt.show()
+
+    # --------------------
+    # Plot: ‖u(t)‖ separately
+    # --------------------
+    plt.figure(figsize=(6, 3))
+    plt.plot(ts_np, u_np, linewidth=2)
+    plt.axvspan(0, 0.4, color='blue', alpha=0.3)
+    plt.axvspan(5.5, 5.9, color='blue', alpha=0.3)
+    plt.xlabel("Time [s]")
+    plt.ylabel(r"Normalized Control Input $\|u(t)\|$")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.rcParams['pdf.fonttype'] = 42
+    plt.savefig(outputs_dir / "normalized_u_norm_plot.pdf", dpi=300)
+    plt.show()
+
 
 
     # Optionally, split ys if needed (e.g., into q_ts and q_d_ts)

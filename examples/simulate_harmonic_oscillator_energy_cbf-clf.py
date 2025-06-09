@@ -2,8 +2,7 @@ import csv
 import diffrax as dx
 from functools import partial
 import jax
-from cbfpy import CBF, CBFConfig
-from cbfpy.cbfs.clf_cbf import CLFCBF, CLFCBFConfig
+from cbfpy.cbfpy.cbfs.clf_cbf import CLFCBF, CLFCBFConfig
 
 jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
@@ -123,7 +122,7 @@ def simulate_harmonic_oscillator_with_cbf_clf():
 
             return B
         
-        def V_2(self, z) -> Array:
+        def V_2(self, z, z_des) -> Array:
             q, q_d = jnp.split(z, 2)
 
             # V = jnp.sqrt(jnp.square(q - q_des))
