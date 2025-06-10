@@ -331,28 +331,28 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             return jnp.concatenate([q_d_masked, drift_masked])
 
-        def g(self, z) -> Array:
-            """
-            Control influence matrix g(z) for dz/dt = f(z) + g(z)·u
-            """
-            # second row is zero, the shearing part, or full remove the row 
-            q, q_d = jnp.split(z, 2)
+        # def g(self, z) -> Array:
+        #     """
+        #     Control influence matrix g(z) for dz/dt = f(z) + g(z)·u
+        #     """
+        #     # second row is zero, the shearing part, or full remove the row 
+        #     q, q_d = jnp.split(z, 2)
 
-            B, _, _, _, _, _ = dynamical_matrices_fn(self.robot_params, q, q_d)
+        #     B, _, _, _, _, _ = dynamical_matrices_fn(self.robot_params, q, q_d)
 
-            A = actuation_mapping_fn(
-                forward_kinematics_fn,
-                auxiliary_fns["jacobian_fn"],
-                self.robot_params,
-                strain_basis,
-                xi_eq,  # xi_eq
-                q           # for dynamic compensation
-            )
+        #     A = actuation_mapping_fn(
+        #         forward_kinematics_fn,
+        #         auxiliary_fns["jacobian_fn"],
+        #         self.robot_params,
+        #         strain_basis,
+        #         xi_eq,  # xi_eq
+        #         q           # for dynamic compensation
+        #     )
 
-            g_mat = jnp.linalg.inv(B) @ A
-            zero_block = jnp.zeros((q.shape[0], g_mat.shape[1]))
+        #     g_mat = jnp.linalg.inv(B) @ A
+        #     zero_block = jnp.zeros((q.shape[0], g_mat.shape[1]))
 
-            return jnp.concatenate([zero_block, g_mat], axis=0)  # shape (2n, m)
+        #     return jnp.concatenate([zero_block, g_mat], axis=0)  # shape (2n, m)
         
         def g(self, z) -> Array:
             """
