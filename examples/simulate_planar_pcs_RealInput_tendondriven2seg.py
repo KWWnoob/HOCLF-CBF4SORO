@@ -324,7 +324,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         def f(self, z) -> Array:
             q, q_d = jnp.split(z, 2)  # Split state z into q (position) and q_d (velocity)
             B, C, G, K, D, alpha = dynamical_matrices_fn(self.robot_params, q, q_d)
-
+            print(B)
             # Drift term (f(x))
             drift = (
                 -jnp.linalg.inv(B) @ (C @ q_d + D @ q_d + G + K)

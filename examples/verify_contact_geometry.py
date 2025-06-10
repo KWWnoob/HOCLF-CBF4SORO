@@ -1,111 +1,43 @@
-from functools import partial
-import jax
-
-jax.config.update("jax_enable_x64", True)  # double precision
-jax.config.update("jax_platform_name", "cpu")  # use CPU
-from jax import Array, jacfwd, jit, vmap
-from jax import numpy as jnp
-import jsrm
-from jsrm.systems import planar_pcs
-import matplotlib.patches as mpatches
+import jax.numpy as jnp
+from jax.numpy.linalg import svd, qr
 import matplotlib.pyplot as plt
-import numpy as onp
-from pathlib import Path
-from typing import Callable, Dict, Tuple
 
-from src.planar_contact_geometry import compute_planar_contact_geometry
-from src.planar_pcs_rendering import draw_image
+# Step 0: 你提供的原始 B 矩陣
+B = jnp.array([
+    [ 2.82574926e-04, -8.86464824e-04,  3.78924318e-04,  5.19823328e-05, -4.38618638e-04,  2.40064210e-04],
+    [-8.86464824e-04,  3.93379672e-03,  0.00000000e+00, -1.35075375e-04,  1.46666396e-03, -1.59509080e-04],
+    [ 3.78924318e-04,  0.00000000e+00,  3.93379672e-03,  4.68178736e-05,  1.59509080e-04,  1.46666396e-03],
+    [ 5.19823328e-05, -1.35075375e-04,  4.68178736e-05,  1.25711318e-05, -9.67492163e-05,  4.62961100e-05],
+    [-4.38618638e-04,  1.46666396e-03,  1.59509080e-04, -9.67492163e-05,  9.83864879e-04,  0.00000000e+00],
+    [ 2.40064210e-04, -1.59509080e-04,  1.46666396e-03,  4.62961100e-05,  0.00000000e+00,  9.83864879e-04]
+])
 
+# Step 1: 使用 QR 分解作為變換矩陣
+Q, R = qr(B)
+T_qr = Q  # 正交變換矩陣 (6x6)
 
-# define the outputs directory
-outputs_dir = Path("outputs") / "planar_contact_geometry"
-outputs_dir.mkdir(parents=True, exist_ok=True)
+# Step 2: 變換後的新 B 矩陣（近似解耦輸入矩陣）
+B_new = B @ T_qr
 
-# load symbolic expressions
-num_segments = 1
-# filepath to symbolic expressions
-sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"planar_pcs_ns-{num_segments}.dill"
+# Step 3: 可視化分析 B_new 結構（是否近似塊對角）
+plt.figure(figsize=(6,5))
+plt.imshow(jnp.abs(B_new), cmap='viridis')
+plt.title("Abs(B @ T_qr): 解耦後的 B")
+plt.colorbar(label='|value|')
+plt.xlabel("T_qr Columns (ũ input space)")
+plt.ylabel("B Rows (system output space)")
+plt.grid(False)
+plt.tight_layout()
+plt.show()
 
-# set soft robot parameters
-rho = 1070 * jnp.ones((num_segments,))  # Volumetric density of Dragon Skin 20 [kg/m^3]
-robot_params = {
-    "th0": jnp.array(0.0),  # initial orientation angle [rad]
-    "l": 1e-1 * jnp.ones((num_segments,)),
-    "r": 2e-2 * jnp.ones((num_segments,)),
-    "rho": rho,
-    "g": jnp.array([0.0, 9.81]),
-    "E": 2e3 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
-    "G": 1e3 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
-}
-# damping matrix
-robot_params["D"] = 5e-5 * jnp.diag(jnp.array([1e0, 1e3, 1e3]) * robot_params["l"])
+# Step 4: 可選 - 輸出前 3 列主要集中在哪些行（解耦評估）
+abs_B_new = jnp.abs(B_new)
+segment1_rows = abs_B_new[:3, :3]
+segment2_rows = abs_B_new[3:, 3:]
 
-# activate all strains (i.e. bending, shear, and axial)
-strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
+print(B_new)
+print("Segment 1 block (rows 0–2, cols 0–2):")
+print(segment1_rows)
 
-# call the factory function for the planar PCS
-strain_basis, forward_kinematics_fn, dynamical_matrices_fn, auxiliary_fns = planar_pcs.factory(
-    sym_exp_filepath, strain_selector
-)
-
-
-def static_example():
-    # define the configuration
-    q = jnp.array([jnp.pi, 0.1, 0.1])
-
-    # define the position and radius of the end-effector
-    x_obs = jnp.array([0.05, 0.05])
-    R_obs = jnp.array(0.008)
-
-    # compute the backbone distances
-    d_min, s_min_dist, n_c_min_dist, aux = compute_planar_contact_geometry(
-        forward_kinematics_fn, auxiliary_fns, robot_params, q, x_obs, R_obs
-    )
-
-    # print("d_min:", d_min)
-    # print("s_min_dist:", s_min_dist)
-    # print("n_c_min_dist:", n_c_min_dist)
-    # print("aux:", aux)
-
-    s_pts = aux["s_pts"]
-    chi_pts = aux["chi_pts"]
-
-    fig, ax = plt.subplots()
-    # ax.plot(chi_pts[:, 0], chi_pts[:, 1], "k-", linewidth=4.0)
-    # scatter plot of backbone with the color visualizing the distance to the obstacle
-    sc = ax.scatter(chi_pts[:, 0], chi_pts[:, 1], c=aux["d_pts"], s=20, cmap="gist_heat")
-    # plot the obstacle
-    ax.add_patch(mpatches.Circle((x_obs[0], x_obs[1]), R_obs, fill=True, color="g"))
-    # plot the point of minimum distance
-    ax.scatter(aux["chi_min_dist"][0], aux["chi_min_dist"][1], c="blue", s=200, marker="x")
-    # plot the normal vector
-    ax.quiver(
-        aux["chi_min_dist"][0],
-        aux["chi_min_dist"][1],
-        n_c_min_dist[0],
-        n_c_min_dist[1],
-        color="blue",
-        scale=2e0,
-        width=0.02,
-    )
-    ax.set_xlabel("x [m]")
-    ax.set_ylabel("y [m]")
-    ax.set_aspect("equal")
-    plt.colorbar(sc, label="d [m]")
-    plt.grid(True)
-    plt.savefig(outputs_dir / "static_example.pdf")
-    plt.show()
-
-    # draw the image
-    img = draw_image(
-        vmap(forward_kinematics_fn, in_axes=(None, None, 0)), auxiliary_fns, robot_params, q, x_obs, R_obs
-    )
-    plt.figure()
-    plt.imshow(img)
-    plt.axis("off")
-    plt.savefig(outputs_dir / "static_example_rendering.pdf")
-    plt.show()
-
-
-if __name__ == "__main__":
-    static_example()
+print("\nSegment 2 block (rows 3–5, cols 3–5):")
+print(segment2_rows)
