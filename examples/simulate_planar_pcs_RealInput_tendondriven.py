@@ -40,18 +40,19 @@ sym_exp_filepath = Path(jsrm.__file__).parent / "symbolic_expressions" / f"plana
 rho = 1070 * jnp.ones((num_segments,))  # Volumetric density of Dragon Skin 20 [kg/m^3]
 robot_length = 1.3e-1
 robot_radius = 2e-2
+
 robot_params = {
     "th0": jnp.array(0.0),  # initial orientation angle [rad]
-    "l": robot_length * jnp.ones((num_segments,)),
-    "r": robot_radius * jnp.ones((num_segments,)),
-    "rho": rho,
-    "g": jnp.array([0.0, 9.81]),
+    "l": robot_length * jnp.ones((num_segments,)), # robot length
+    "r": robot_radius * jnp.ones((num_segments,)), # robot radius
+    "rho": rho, # density
+    "g": jnp.array([0.0, 9.81]),    # gravity
     "E": 2e3 * jnp.ones((num_segments,)),  # Elastic modulus [Pa]
     "G": 1e3 * jnp.ones((num_segments,)),  # Shear modulus [Pa]
     "d": 2e-2 * jnp.array([[1.0, -1.0]]).repeat(num_segments, axis=0),  # distance of tendons from the central axis [m]
 }
 # damping matrix
-damping_array = jnp.array([1e0, 1e3, 1e3]) * 1
+damping_array = jnp.array([1e0, 1e3, 1e3]) * 10
 multiplier = [1.5**m * damping_array for m in range(num_segments)]
 robot_params["D"] = 5e-5 * jnp.diag(jnp.concatenate(multiplier)) * robot_length #depend on the num of segments
 
@@ -233,6 +234,12 @@ def compute_contact_force(p_robot_end, p_obs, r_robot, r_obj, c_damp = 50):
     
     return F_contact
 
+def discretize_to_bangbang(u_qp: jnp.ndarray, u_max: float, threshold: float = 0.1) -> jnp.ndarray:
+    return jnp.where(
+        jnp.abs(u_qp) < threshold, 0.0,      
+        jnp.sign(u_qp) * u_max                   
+    )
+
 def soft_robot_with_safety_contact_CBFCLF_example():
     
     # define the ODE function
@@ -298,7 +305,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             '''Real Input'''
             # self.actuation_mask = jnp.array([1, 0, 1])
             # self.active_idx = jnp.where(self.actuation_mask == 1)[0]  
-
+            
             super().__init__(
                 n=6 * num_segments, # number of states
                 m=2 * num_segments, # _number of inputs
@@ -306,7 +313,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 u_max = 20 * jnp.ones(2*num_segments),
                 # Note: Relaxing the CLF-CBF QP is tricky because there is an additional relaxation
                 # parameter already, balancing the CLF and CBF constraints.
-                relax_cbf=False,
+                relax_cbf=True,
                 # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
                 cbf_relaxation_penalty=1e6,
                 clf_relaxation_penalty=10
@@ -323,7 +330,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             drift_full = -jnp.linalg.inv(B) @ (C @ q_d + D @ q_d + G + K)
 
             # creating a mask
-            mask = jnp.array([1.0, 0.0, 1.0])
+            mask = jnp.array([1.0, 1.0, 1.0])
 
             # freeze the second row
             q_d_masked   = mask * q_d
@@ -331,75 +338,74 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             return jnp.concatenate([q_d_masked, drift_masked])
 
-        # def g(self, z) -> Array:
-        #     """
-        #     Control influence matrix g(z) for dz/dt = f(z) + g(z)·u
-        #     """
-        #     # second row is zero, the shearing part, or full remove the row 
-        #     q, q_d = jnp.split(z, 2)
-
-        #     B, _, _, _, _, _ = dynamical_matrices_fn(self.robot_params, q, q_d)
-
-        #     A = actuation_mapping_fn(
-        #         forward_kinematics_fn,
-        #         auxiliary_fns["jacobian_fn"],
-        #         self.robot_params,
-        #         strain_basis,
-        #         xi_eq,  # xi_eq
-        #         q           # for dynamic compensation
-        #     )
-
-        #     g_mat = jnp.linalg.inv(B) @ A
-        #     zero_block = jnp.zeros((q.shape[0], g_mat.shape[1]))
-
-        #     return jnp.concatenate([zero_block, g_mat], axis=0)  # shape (2n, m)
-        
         def g(self, z) -> Array:
             """
-            Control influence matrix g(z) for dz/dt = f(z) + g(z)·u,
-            with 2nd dimension frozen in both state and inputs.
+            Control influence matrix g(z) for dz/dt = f(z) + g(z)·u
             """
-            # split state
+            # second row is zero, the shearing part, or full remove the row 
             q, q_d = jnp.split(z, 2)
 
-            # compute dynamics and actuation mapping
             B, _, _, _, _, _ = dynamical_matrices_fn(self.robot_params, q, q_d)
+
             A = actuation_mapping_fn(
                 forward_kinematics_fn,
                 auxiliary_fns["jacobian_fn"],
-                robot_params,
+                self.robot_params,
                 strain_basis,
-                xi_eq,
-                q
-            )  # shape (n, m)
+                xi_eq,  # xi_eq
+                q           # for dynamic compensation
+            )
 
-            # full control influence on acceleration: shape (n, m)
-            g_full = jnp.linalg.inv(B) @ A
+            g_mat = jnp.linalg.inv(B) @ A
+            zero_block = jnp.zeros((q.shape[0], g_mat.shape[1]))
 
-            # freeze the second row
-            mask = jnp.array([1.0, 0.0, 1.0])           # length n
-            M = jnp.diag(mask)                          # shape (n, n)
+            return jnp.concatenate([zero_block, g_mat], axis=0)  # shape (2n, m)
+        
+        # def g(self, z) -> Array:
+        #     """
+        #     Control influence matrix g(z) for dz/dt = f(z) + g(z)·u,
+        #     with 2nd dimension frozen in both state and inputs.
+        #     """
+        #     # split state
+        #     q, q_d = jnp.split(z, 2)
 
-            # freeze the second column
-            m = g_full.shape[1]                         
-            input_mask = jnp.ones(m)                    # length m
-            input_mask = input_mask.at[1].set(0)       
-            N = jnp.diag(input_mask)                    # shape (m, m)
+        #     # compute dynamics and actuation mapping
+        #     B, _, _, _, _, _ = dynamical_matrices_fn(self.robot_params, q, q_d)
+        #     A = actuation_mapping_fn(
+        #         forward_kinematics_fn,
+        #         auxiliary_fns["jacobian_fn"],
+        #         robot_params,
+        #         strain_basis,
+        #         xi_eq,
+        #         q
+        #     )  # shape (n, m)
 
-            # product
-            acc_block = M @ g_full @ N                  # shape (n, m)
+        #     # full control influence on acceleration: shape (n, m)
+        #     g_full = jnp.linalg.inv(B) @ A
 
-            # velocity = 0
-            zero_block = jnp.zeros_like(acc_block)      # shape (n, m)
+        #     # freeze the second row
+        #     mask = jnp.array([1.0, 0.0, 1.0])           # length n
+        #     M = jnp.diag(mask)                          # shape (n, n)
 
-            return jnp.concatenate([zero_block, acc_block], axis=0)
+        #     # freeze the second column
+        #     m = g_full.shape[1]                         
+        #     input_mask = jnp.ones(m)                    # length m
+        #     input_mask = input_mask.at[1].set(0)       
+        #     N = jnp.diag(input_mask)                    # shape (m, m)
+
+        #     # product
+        #     acc_block = M @ g_full              # shape (n, m)
+
+        #     # velocity = 0
+        #     zero_block = jnp.zeros_like(acc_block)      # shape (n, m)
+
+        #     return jnp.concatenate([zero_block, acc_block], axis=0)
          
         def V_2(self, z, z_des) -> jnp.ndarray:
             # CLF: tracking error for both the middle point and the tip (last point)
             
             # Split state into positions (q) and velocities (q_d)
             q, q_d = jnp.split(z, 2)
-
             # Compute forward kinematics for the current configuration.
             p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
             
@@ -445,7 +451,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             """
             # Split the state vector into positions (q) and velocities (q_d)
             q, q_d = jnp.split(z, 2)
-            
             # Compute the forward kinematics for the robot
             p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
             
@@ -481,61 +486,17 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             tip_penetration = tip_penetration[None,...]
 
             penetration_depth_poly = jnp.concatenate([pairwise_penetration, tip_penetration])
-            # normalized_pd = jnp.tanh(penetration_depth_poly / 0.03)
+            normalized_pd = jnp.tanh(penetration_depth_poly / 0.03) #tanh, maximum and minimum
             h_return = -1 / kappa * jnp.log(jnp.sum(jnp.exp(-kappa * penetration_depth_poly)))
             penetration_depth_poly = penetration_depth_poly.reshape(-1)
             
             return penetration_depth_poly
-        
-        
-        # def h(self, z: jnp.ndarray) -> jnp.ndarray:
-        #     """Barrier function h_i(z) = - penetration_depth_i(z), vector-valued"""
-        #     q, q_d = jnp.split(z, 2)
-        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
-        #     p_ps = p[:, :2]
-        #     p_orientation = p[:, 2]
-
-        #     current_points = p_ps[:-1]
-        #     next_points = jnp.concatenate([p_ps[1:-1], p_ps[-1][None, :]])
-        #     orientations = p_orientation[:-1]
-
-        #     def segment_robot(current, next, orientation):
-        #         return segmented_polygon(current, next, orientation, robot_radius)
-            
-        #     robot_poly = jax.vmap(segment_robot)(current_points, next_points, orientations)
-
-        #     pairwise_penetration, _ = jax.vmap(
-        #         lambda poly: jax.vmap(lambda obs: compute_distance(poly, obs))(self.poly_obstacle_pos)
-        #     )(robot_poly)
-
-        #     end_start = p_ps[-2]
-        #     end_end = p_ps[-1]
-        #     d = (end_end - end_start) / jnp.linalg.norm(end_end - end_start)
-        #     angle = jnp.arctan2(d[1], d[0])
-        #     robot_tip = half_circle_to_polygon(p_ps[-1], angle, robot_radius)
-        #     tip_penetration, _ = jax.vmap(compute_distance, in_axes=(0, None))(self.poly_obstacle_pos, robot_tip)
-        #     tip_penetration = tip_penetration[None, ...]
-
-        #     penetration_depth = jnp.concatenate([pairwise_penetration, tip_penetration]).reshape(-1)
-        #     h_vec = penetration_depth  # shape (M,)
-        #     return h_vec
-
-        # def h_d(self, z: jnp.ndarray) -> jnp.ndarray:
-        #     dh_dz = jax.jacobian(self.h)(z)     # shape: (M, 2n)
-        #     z_dot = self.f(z)                   # already shape: (2n,)
-        #     return dh_dz @ z_dot                # output shape: (M,)
-                
-        # def h_2(self, z: jnp.ndarray, alpha: float = 0.5) -> jnp.ndarray:
-        #     h_val = self.h(z)
-        #     h_d_val = self.h_d(z)
-        #     return h_d_val + alpha * h_val  # shape (M,)
-
                     
         def alpha_2(self, h_2):
-            return h_2*20#constant, increase for smaller affected zone
+            return h_2*500#constant, increase for smaller affected zone
         
         def gamma_2(self, v_2):
-            return v_2*20
+            return v_2*500
 
     config = SoRoConfig()
     clf_cbf = CLFCBF.from_config(config)
@@ -546,9 +507,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         q_d_des = jnp.zeros_like(q_des)
         q_des = jnp.concatenate([q_des, q_d_des])
         
-        
         # evaluate the control policy
         u_reduced = clf_cbf.controller(y,q_des)
+        u_reduced = discretize_to_bangbang(u_reduced, u_max=2.0, threshold=0.1)
         # u_full = jnp.zeros_like(q)  # or jnp.zeros((3,))
         # u_full = u_full.at[config.active_idx].set(u_reduced)
 
@@ -585,12 +546,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     q_des = config.q_des
 
     # define the sampling and simulation time step
-    dt = 2e-3
-    sim_dt = 1e-3
     # dt = 2e-3
     # sim_dt = 1e-3
-    # dt = 5e-4
-    # sim_dt = 1e-4
+    # dt = 2e-3
+    # sim_dt = 1e-3
+    dt = 5e-4
+    sim_dt = 1e-4
 
 
     # define the time steps
@@ -608,6 +569,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     u_list = []
     for y in sol.ys:
         u = clf_cbf.controller(y, q_des)
+        u = discretize_to_bangbang(u, u_max=2.0, threshold=0.1)
         u_list.append(onp.array(u))
     u_array = onp.stack(u_list)
 
