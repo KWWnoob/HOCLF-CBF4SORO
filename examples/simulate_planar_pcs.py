@@ -136,7 +136,7 @@ def soft_robot_regulation_example():
 
         # the torque is equal to the potential forces at the desired configuration
         tau = G_des + K_des
-
+        print(tau)
         return tau
 
     def closed_loop_ode_fn(t: float, y: Array, q_des: Array) -> Array:
@@ -307,7 +307,7 @@ def control_lyapunov_function_example():
     plt.show()
 
 if __name__ == "__main__":
-    soft_robot_ode_example()
+    # soft_robot_ode_example()
     soft_robot_regulation_example()
-    regulation_objective_example()
-    control_lyapunov_function_example()
+    # regulation_objective_example()
+    # control_lyapunov_function_example()

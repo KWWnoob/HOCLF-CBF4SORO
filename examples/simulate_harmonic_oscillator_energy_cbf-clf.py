@@ -2,7 +2,7 @@ import csv
 import diffrax as dx
 from functools import partial
 import jax
-from cbfpy.cbfpy.cbfs.clf_cbf import CLFCBF, CLFCBFConfig
+from cbfpy.cbfs.clf_cbf import CLFCBF, CLFCBFConfig
 
 jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
