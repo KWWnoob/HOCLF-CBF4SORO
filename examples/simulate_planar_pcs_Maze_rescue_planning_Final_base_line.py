@@ -535,6 +535,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         
         u = Kp * (q_des - q) + Kd * (q_d_des - q_d)
         return u
+    
     @jax.jit
     def control_policy_fn(q_des: Array) -> Array:
         """
@@ -547,11 +548,11 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             tau: generalized torque
         """
         # compute the dynamical matrices at the desired configuration
+        q_des, _ = jnp.split(q_des, 2) # get the desired position
         B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
 
         # the torque is equal to the potential forces at the desired configuration
         tau = G_des + K_des
-        print( "tau shape: ", tau.shape)
         return tau
 
 
