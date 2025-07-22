@@ -390,7 +390,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.p_des_2 = jnp.stack([self.p_des_1_2,self.p_des_2_2])
             self.p_des_3 = jnp.stack([self.p_des_2_2,self.p_des_2_3])
             
-            self.p_des_all = jnp.stack([self.p_des_1, self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
+            self.p_des_all = jnp.stack([self.p_des_1]) # shape (num_waypoints, num_of_segments, 3)
             self.num_waypoints = self.p_des_all.shape[0]
             
             '''Select the end of each segment'''
@@ -398,7 +398,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 3000 #contact force model
-            self.maximum_withhold_force = 20
+            self.maximum_withhold_force = -20
             
             super().__init__(
                 n=6 * num_segments, # number of states

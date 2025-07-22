@@ -380,15 +380,15 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 30 * num_segments) # segmented
 
             '''Desired position of the robot'''
-            self.q_des_1_1 = jnp.array([-5, 0.1, 0.2])
-            self.q_des_1_2 = jnp.array([-5, 0.1, 0.2]) #bend shear elongation
+            self.q_des_1_1 = jnp.array([6.48852390e+00,  5.62927885e-02, -4.71399263e-01])
+            self.q_des_1_2 = jnp.array([-6.82988735e+00, 1.11650277e+00, -3.27210884e-01]) #bend shear elongation
 
             self.q_des_2_1 = jnp.array([-1.97662728e+01, -1.66824356e+00,  7.54860428e-01])
             self.q_des_2_2 = jnp.array([1.98242897e+01, -1.44268228e+00,  3.42432095e-01 ]) #bend shear elongation
             
             self.q_des_1 = jnp.stack([self.q_des_1_1,self.q_des_1_2])
             self.q_des_2 = jnp.stack([self.q_des_2_1,self.q_des_2_2])
-            self.q_des_all = jnp.stack([self.q_des_2]) # shape (num_waypoints, num_of_segments, 3)
+            self.q_des_all = jnp.stack([self.q_des_1, self.q_des_2]) # shape (num_waypoints, num_of_segments, 3)
 
             self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.7, -jnp.pi*1.8*robot_length])
             self.p_des_1_2 = jnp.array([0.06, 0.18234353, 0])
@@ -662,10 +662,11 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         p = batched_forward_kinematics_fn(config.robot_params, q, config.s_ps)
         end_p_ps = p[track_indices, :2]
 
-        tracking_error = jnp.sum(jnp.stack([
-            jnp.linalg.norm(end_p_ps[i, :] - current_z_des_pos[i, :2])
-            for i in range(num_segments)
-        ]))
+        # tracking_error = jnp.sum(jnp.stack([
+        #     jnp.linalg.norm(end_p_ps[i, :] - current_z_des_pos[i, :2])
+        #     for i in range(num_segments)
+        # ]))
+        tracking_error = jnp.linalg.norm(q - current_z_des_pos.flatten())
 
         new_index = jnp.where(tracking_error < 0.05,
                             jnp.minimum(current_index + 1, q_des_all.shape[0] - 1),
