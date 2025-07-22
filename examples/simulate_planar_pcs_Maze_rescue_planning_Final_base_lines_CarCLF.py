@@ -382,8 +382,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.q_des_1_1 = jnp.array([-2, 0.1, -0.2])
             self.q_des_1_2 = jnp.array([-2, 0.1, -0.2]) #bend shear elongation
 
-            self.q_des_2_1 = jnp.array([-10, 0.1, 0.2])
-            self.q_des_2_2 = jnp.array([10, 0.1, 0.0]) #bend shear elongation
+            self.q_des_2_1 = jnp.array([-10, 0.2, 0.5])
+            self.q_des_2_2 = jnp.array([10, 0.1, 0.3]) #bend shear elongation
 
             self.q_des_1 = jnp.stack([self.q_des_1_1,self.q_des_1_2])
             self.q_des_2 = jnp.stack([self.q_des_2_1,self.q_des_2_2])
@@ -407,7 +407,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.p_des_2_1 = fk_output[29] 
             self.p_des_2_2 = fk_output[-1]   
             self.p_des_2 = jnp.stack([self.p_des_2_1, self.p_des_2_2])
-            # print("p_des_2:", fk_output)
+            print("p_des_2:", self.p_des_2 )
 
             # self.p_des_all = jnp.stack([self.p_des_1, self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
             self.p_des_all = jnp.stack([self.q_des_2])

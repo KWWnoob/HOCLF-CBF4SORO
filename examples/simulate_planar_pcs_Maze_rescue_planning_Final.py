@@ -379,38 +379,18 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 30 * num_segments) # segmented
 
-            self.q_des_1_1 = jnp.array([-5, 0.1, 0.2])
-            self.q_des_1_2 = jnp.array([-5, 0.1, 0.2]) #bend shear elongation
+            self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.7, -jnp.pi*1.8*robot_length])
+            self.p_des_1_2 = jnp.array([0.06, 0.18234353, 0])
 
-            self.q_des_2_1 = jnp.array([-10, 0.1, 0.2])
-            self.q_des_2_2 = jnp.array([10, 0.1, 0.2]) #bend shear elongation
+            self.p_des_2_1 = jnp.array([0.05951909*1.5, 0.15234353*0.85, -jnp.pi*1.8*robot_length])
+            self.p_des_2_2 = jnp.array([0.12, 0.21234353, 0])
+            self.p_des_2_3= jnp.array([0.21, 0.38234353, 0])
 
-            self.q_des_1 = jnp.stack([self.q_des_1_1,self.q_des_1_2])
-            self.q_des_2 = jnp.stack([self.q_des_2_1,self.q_des_2_2])
-            self.q_des_all = jnp.stack([self.q_des_2]) # shape (num_waypoints, num_of_segments, 3)
-
-            # self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.7, -jnp.pi*1.8*robot_length])
-            # self.p_des_1_2 = jnp.array([0.06, 0.18234353, 0])
-
-            # self.p_des_2_1 = jnp.array([0.05951909*1.5, 0.15234353*0.85, -jnp.pi*1.8*robot_length])
-            # self.p_des_2_2 = jnp.array([0.12, 0.21234353, 0])
-            # self.p_des_2_3= jnp.array([0.21, 0.38234353, 0])
-
-            # self.p_des_1 = jnp.stack([self.p_des_1_1,self.p_des_2_2])
-            # self.p_des_2 = jnp.stack([self.p_des_1_2,self.p_des_2_2])
-            # self.p_des_3 = jnp.stack([self.p_des_2_2,self.p_des_2_3])
+            self.p_des_1 = jnp.stack([self.p_des_1_1,self.p_des_2_2])
+            self.p_des_2 = jnp.stack([self.p_des_1_2,self.p_des_2_2])
+            self.p_des_3 = jnp.stack([self.p_des_2_2,self.p_des_2_3])
             
-            q_des_full = jnp.concatenate([self.q_des_2_1, self.q_des_2_2])  # shape (6,)
-
-            # forward kinematics
-            fk_output = batched_forward_kinematics_fn(self.robot_params, q_des_full, self.s_ps)
-            self.p_des_2_1 = fk_output[29] 
-            self.p_des_2_2 = fk_output[-1]   
-            self.p_des_2 = jnp.stack([self.p_des_2_1, self.p_des_2_2])
-            # print("p_des_2:", fk_output)
-
-            # self.p_des_all = jnp.stack([self.p_des_1, self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
-            self.p_des_all = jnp.stack([self.p_des_2])
+            self.p_des_all = jnp.stack([self.p_des_1, self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
             self.num_waypoints = self.p_des_all.shape[0]
             
             '''Select the end of each segment'''
@@ -418,7 +398,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 3000 #contact force model
-            self.maximum_withhold_force = -20
+            self.maximum_withhold_force = 20
             
             super().__init__(
                 n=6 * num_segments, # number of states
@@ -643,7 +623,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # Run the simulation
     ts, ys = run_simulation()
-
+    print(ys[-1])# Print the final state
     # Optionally, split ys if needed (e.g., into q_ts and q_d_ts)
     q_ts, q_d_ts = jnp.split(ys, 2, axis=1)
     # ---------------------------------------------------

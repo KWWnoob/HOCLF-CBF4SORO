@@ -383,12 +383,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.q_des_1_1 = jnp.array([-5, 0.1, 0.2])
             self.q_des_1_2 = jnp.array([-5, 0.1, 0.2]) #bend shear elongation
 
-            self.q_des_2_1 = jnp.array([-10, 0.1, 0.2])
-            self.q_des_2_2 = jnp.array([10, 0.1, 0.2]) #bend shear elongation
-
+            self.q_des_2_1 = jnp.array([-1.97662728e+01, -1.66824356e+00,  7.54860428e-01])
+            self.q_des_2_2 = jnp.array([1.98242897e+01, -1.44268228e+00,  3.42432095e-01 ]) #bend shear elongation
+            
             self.q_des_1 = jnp.stack([self.q_des_1_1,self.q_des_1_2])
             self.q_des_2 = jnp.stack([self.q_des_2_1,self.q_des_2_2])
-            self.q_des_all = jnp.stack([self.q_des_1, self.q_des_2]) # shape (num_waypoints, num_of_segments, 3)
+            self.q_des_all = jnp.stack([self.q_des_2]) # shape (num_waypoints, num_of_segments, 3)
 
             self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.7, -jnp.pi*1.8*robot_length])
             self.p_des_1_2 = jnp.array([0.06, 0.18234353, 0])
@@ -498,7 +498,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             return safety
                     
         def alpha_2(self, h_2):
-            return h_2*30 #constant, increase for smaller affected zone
+            return h_2*10 #constant, increase for smaller affected zone
 
     config = SoRoConfig()
     cbf = CBF.from_config(config)
@@ -555,9 +555,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         q_dot_des = jnp.zeros_like(q)
 
         # Gains
-        Kp = jnp.ones_like(q) * 2.0
-        Kd = jnp.ones_like(q) * 0.5
-        Ki = jnp.ones_like(q) * 0.2 if e_int is not None else 0.0
+        Kp = jnp.ones_like(q) * 0.8
+        Kd = jnp.ones_like(q) * 0.2
+        Ki = jnp.ones_like(q) * 0.1 if e_int is not None else 0.0
 
         # PID control torque directly
         if e_int is not None:
@@ -568,7 +568,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         _, _, _, K_des, _, _ = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
         _, _, G, _, _, _ = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
 
-        return tau + K_des + G
+        return tau + G + K_des
 
     @jax.jit
     def control_policy_fn(q_des: Array) -> Array:
