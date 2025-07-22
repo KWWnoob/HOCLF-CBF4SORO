@@ -383,8 +383,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.q_des_1_1 = jnp.array([-0.8, 0.1, 0.6])
             self.q_des_1_2 = jnp.array([-0.3, 0.1, 0.3]) #bend shear elongation
 
-            self.q_des_2_1 = jnp.array([1.0, 0.3, 1.3])
-            self.q_des_2_2 = jnp.array([0.8, 0.3, 1.3]) #bend shear elongation
+            self.q_des_2_1 = jnp.array([-10, 0.1, 0.2])
+            self.q_des_2_2 = jnp.array([10, 0.1, 0.2]) #bend shear elongation
 
             self.q_des_1 = jnp.stack([self.q_des_1_1,self.q_des_1_2])
             self.q_des_2 = jnp.stack([self.q_des_2_1,self.q_des_2_2])
@@ -495,7 +495,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             safety = self.maximum_withhold_force + penetration_depth_poly*self.contact_spring_constant
             # print(safety.shape)
             # return safe_distance*self.contact_spring_constant
-            return jnp.array([1.0])
+            return safety
                     
         def alpha_2(self, h_2):
             return h_2*30 #constant, increase for smaller affected zone
@@ -524,17 +524,19 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     #     error = jnp.concatenate([error_middle, error_tip])
     #     return error
     
-    @jax.jit
-    def nominal_controller(z: jnp.ndarray, z_des: jnp.ndarray) -> jnp.ndarray:
-        q, q_d = jnp.split(z, 2)
+    def nominal_controller(z, z_des):
+        q, q_dot = jnp.split(z, 2)
         q_des, _ = jnp.split(z_des, 2)
-        q_d_des = jnp.zeros_like(q_des)
+        q_dot_des = jnp.zeros_like(q)
 
-        Kp = jnp.ones_like(q) * 0.1
-        Kd = jnp.ones_like(q) * 0.01
-        
-        u = Kp * (q_des - q) + Kd * (q_d_des - q_d)
-        return u
+        Kp = jnp.ones_like(q) * 5.0
+        Kd = jnp.ones_like(q) * 0.5
+        q_ddot_des = Kp * (q_des - q) + Kd * (q_dot_des - q_dot)
+
+        M, C, G, _, _, alpha__des = dynamical_matrices_fn(robot_params, q, q_dot)
+
+        tau = M @ q_ddot_des + C @ q_dot + G
+        return tau
     
     @jax.jit
     def control_policy_fn(q_des: Array) -> Array:
@@ -560,7 +562,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         z_des = args
         q, q_d = jnp.split(y, 2)
         # Create the full desired state (assume desired velocity is zero)
-        u = control_policy_fn(z_des)
+        u = nominal_controller(y,z_des)
     
         # u = cbf.safety_filter(y, u)
         
