@@ -6,7 +6,7 @@ import csv
 import diffrax as dx
 from functools import partial
 import jax
-from cbfpy.cbfs.cbf import CBF, CBFConfig
+from cbfpy.cbfs.clf_cbf import CLFCBF, CLFCBFConfig
 import inspect
 from jax.scipy.special import logsumexp
 
@@ -344,7 +344,7 @@ def penetration_to_contact_force(
 def soft_robot_with_safety_contact_CBFCLF_example():
     
     # define the ODE function
-    class SoRoConfig(CBFConfig):
+    class SoRoConfig(CLFCBFConfig):
         '''Config for soft robot'''
 
         def __init__(self):
@@ -379,29 +379,38 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 30 * num_segments) # segmented
 
-            '''Desired position of the robot'''
-            self.q_des_1_1 = jnp.array([-0.8, 0.1, 0.6])
-            self.q_des_1_2 = jnp.array([-0.3, 0.1, 0.3]) #bend shear elongation
+            self.q_des_1_1 = jnp.array([-2, 0.1, -0.2])
+            self.q_des_1_2 = jnp.array([-2, 0.1, -0.2]) #bend shear elongation
 
             self.q_des_2_1 = jnp.array([-10, 0.1, 0.2])
-            self.q_des_2_2 = jnp.array([10, 0.1, 0.2]) #bend shear elongation
+            self.q_des_2_2 = jnp.array([10, 0.1, 0.0]) #bend shear elongation
 
             self.q_des_1 = jnp.stack([self.q_des_1_1,self.q_des_1_2])
             self.q_des_2 = jnp.stack([self.q_des_2_1,self.q_des_2_2])
             self.q_des_all = jnp.stack([self.q_des_2]) # shape (num_waypoints, num_of_segments, 3)
 
-            self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.7, -jnp.pi*1.8*robot_length])
-            self.p_des_1_2 = jnp.array([0.06, 0.18234353, 0])
+            # self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.7, -jnp.pi*1.8*robot_length])
+            # self.p_des_1_2 = jnp.array([0.06, 0.18234353, 0])
 
-            self.p_des_2_1 = jnp.array([0.05951909*1.5, 0.15234353*0.85, -jnp.pi*1.8*robot_length])
-            self.p_des_2_2 = jnp.array([0.12, 0.21234353, 0])
-            self.p_des_2_3= jnp.array([0.21, 0.38234353, 0])
+            # self.p_des_2_1 = jnp.array([0.05951909*1.5, 0.15234353*0.85, -jnp.pi*1.8*robot_length])
+            # self.p_des_2_2 = jnp.array([0.12, 0.21234353, 0])
+            # self.p_des_2_3= jnp.array([0.21, 0.38234353, 0])
 
-            self.p_des_1 = jnp.stack([self.p_des_1_1,self.p_des_2_2])
-            self.p_des_2 = jnp.stack([self.p_des_1_2,self.p_des_2_2])
-            self.p_des_3 = jnp.stack([self.p_des_2_2,self.p_des_2_3])
+            # self.p_des_1 = jnp.stack([self.p_des_1_1,self.p_des_2_2])
+            # self.p_des_2 = jnp.stack([self.p_des_1_2,self.p_des_2_2])
+            # self.p_des_3 = jnp.stack([self.p_des_2_2,self.p_des_2_3])
             
-            self.p_des_all = jnp.stack([self.p_des_1, self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
+            q_des_full = jnp.concatenate([self.q_des_2_1, self.q_des_2_2])  # shape (6,)
+
+            # forward kinematics
+            fk_output = batched_forward_kinematics_fn(self.robot_params, q_des_full, self.s_ps)
+            self.p_des_2_1 = fk_output[29] 
+            self.p_des_2_2 = fk_output[-1]   
+            self.p_des_2 = jnp.stack([self.p_des_2_1, self.p_des_2_2])
+            # print("p_des_2:", fk_output)
+
+            # self.p_des_all = jnp.stack([self.p_des_1, self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
+            self.p_des_all = jnp.stack([self.q_des_2])
             self.num_waypoints = self.p_des_all.shape[0]
             
             '''Select the end of each segment'''
@@ -414,6 +423,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             super().__init__(
                 n=6 * num_segments, # number of states
                 m=3 * num_segments, # number of inputs
+                # Note: Relaxing the CLF-CBF QP is tricky because there is an additional relaxation
+                # parameter already, balancing the CLF and CBF constraints.
+                relax_cbf=False,
+                # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
+                cbf_relaxation_penalty=1e8,
+                clf_relaxation_penalty=10
             )
 
         def f(self, z) -> Array:
@@ -438,7 +453,17 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             zero_block = jnp.zeros((q.shape[0], control_matrix.shape[1]))
 
             return jnp.concatenate([zero_block, control_matrix], axis=0)
-
+   
+        def V_2(self, z, z_des) -> jnp.ndarray:
+            # Split state into positions (q) and velocities (q_d)
+            # z_des is in shape of (num_segments * 3 * 2)
+            q, q_d = jnp.split(z, 2)
+            z_des, _ = jnp.split(z_des, 2) # get the desired position
+            error = jnp.sqrt((q - z_des)**2)
+            return error*10
+        
+    
+        
         def h_2(self, z) -> jnp.ndarray:
             """
             Computes the safety force (barrier function output) for the robot given its state 'z',
@@ -499,76 +524,22 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                     
         def alpha_2(self, h_2):
             return h_2*30 #constant, increase for smaller affected zone
+        
+        def gamma_2(self, v_2):
+            return v_2*30
 
     config = SoRoConfig()
-    cbf = CBF.from_config(config)
-
-    # def V_2(z, z_des, config) -> jnp.ndarray:
-    #     # Split state into positions (q) and velocities (q_d)
-    #     # z_des is in shape of (num_segments * 3 * 2)
-    #     q, q_d = jnp.split(z, 2)
-    #     z_des, _ = jnp.split(z_des, 2) # get the desired position
-    #     z_des = jnp.stack(jnp.split(z_des,num_segments))
-    #     # Compute forward kinematics for the current configuration.
-    #     p = batched_forward_kinematics_fn(config.robot_params, q, config.s_ps)
-        
-    #     p_list = p[config.indices, :]
-
-    #     # Compute the tracking errors.
-    #     # For the "middle" points, use the first two coordinates.
-    #     error_middle = jnp.concatenate([jnp.sqrt((p_list[i,:2]- z_des[i,:2])**2) for i in range(num_segments-1)])
-    #     # # For the "tip" point, use all coordinates and scale the error by 10.
-    #     error_tip = jnp.sqrt((p_list[num_segments-1, :] - z_des[num_segments-1,:])**2)
-        
-    #     # Concatenate the errors into one vector.
-    #     error = jnp.concatenate([error_middle, error_tip])
-    #     return error
-    
-    def nominal_controller(z, z_des):
-        q, q_dot = jnp.split(z, 2)
-        q_des, _ = jnp.split(z_des, 2)
-        q_dot_des = jnp.zeros_like(q)
-
-        Kp = jnp.ones_like(q) * 5.0
-        Kd = jnp.ones_like(q) * 0.5
-        q_ddot_des = Kp * (q_des - q) + Kd * (q_dot_des - q_dot)
-
-        M, C, G, _, _, alpha__des = dynamical_matrices_fn(robot_params, q, q_dot)
-
-        tau = M @ q_ddot_des + C @ q_dot + G
-        return tau
-    
-    @jax.jit
-    def control_policy_fn(q_des: Array) -> Array:
-        """
-        Control policy that regulates the configuration to a desired configuration q_des.
-        Args:
-            t: time
-            y: state vector
-            q_des: desired configuration
-        Returns:
-            tau: generalized torque
-        """
-        # compute the dynamical matrices at the desired configuration
-        q_des, _ = jnp.split(q_des, 2) # get the desired position
-        B_des, C_des, G_des, K_des, D_des, alpha_des = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
-
-        # the torque is equal to the potential forces at the desired configuration
-        tau = G_des + K_des
-        return tau
-
+    clf_cbf = CLFCBF.from_config(config)
 
     def closed_loop_ode_fn(t: float, y: jnp.ndarray, args) -> jnp.ndarray:
         z_des = args
         q, q_d = jnp.split(y, 2)
         # Create the full desired state (assume desired velocity is zero)
-        u = nominal_controller(y,z_des)
-    
-        # u = cbf.safety_filter(y, u)
+        u = clf_cbf.controller(y, z_des)
         
         # Compute the dynamical matrices.
         B, C, G, K, D, alpha = dynamical_matrices_fn(robot_params, q, q_d)
-        #TODO: check
+        
         # Compute the acceleration.
         q_dd = jnp.linalg.inv(B) @ (u - C @ q_d - G - K - D @ q_d)
         
@@ -585,14 +556,14 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # z_des is in shape of (num_segments * 3 * 2)
     # p_des_all = (num_waypoints, num_segments, 3)
-    q_des_all = jnp.stack([
-        jnp.concatenate([q.flatten(), jnp.zeros(3 * num_segments)])
-        for q in config.q_des_all
+    p_des_all = jnp.stack([
+        jnp.concatenate([p.flatten(), jnp.zeros(3 * num_segments)])
+        for p in config.p_des_all
         ])  # shape (num_waypoints, num_segments * 3* 2)
 
 # Time settings.
     t0 = 0.0
-    tf = 8.0
+    tf = 12.0
     dt = 2e-3     # integration step (for manual stepping)
     sim_dt = 1e-3 # simulation dt used by the solver
 
@@ -605,12 +576,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         """
         t, y_current, current_index, track_indices = carry
         # Choose z_des based on current_index
-        current_z_des = q_des_all[current_index]
+        current_z_des = p_des_all[current_index]
 
         # Integrate the ODE from t to t + dt
         sol = dx.diffeqsolve(
             dx.ODETerm(closed_loop_ode_fn),
-            dx.Heun(),
+            dx.Tsit5(),
             t0=t,
             t1=t + dt,
             dt0=sim_dt,
@@ -628,13 +599,15 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         end_p_ps = p[track_indices, :2] # the end of every segement
         
                 # Update flag based on tracking error
-        tracking_error = jnp.sum(jnp.stack([
-            jnp.linalg.norm(end_p_ps[i, :2] - current_z_des[i, :2])
-            for i in range(num_segments)
-        ]))
+        # tracking_error = jnp.sum(jnp.stack([
+        #     jnp.linalg.norm(end_p_ps[i, :2] - current_z_des[i, :2])
+        #     for i in range(num_segments)
+        # ]))
 
-        new_index = jnp.where(tracking_error < 0.05,
-                            jnp.minimum(current_index + 1, q_des_all.shape[0]-1),
+        tracking_error = jnp.linalg.norm(q - current_z_des.flatten())
+
+        new_index = jnp.where(tracking_error < 0.1,
+                            jnp.minimum(current_index + 1, p_des_all.shape[0]-1),
                             current_index)
         
         # Update time
@@ -672,43 +645,43 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     sampled_ts = ts[::20]
     sampled_ys = ys[::20]
 
-    # for z in sampled_ys:
-    #     h_tail = config.h_2(z)[-1]
-    #     h_tail = jnp.min(config.h_2(z))+30
-    #     z_des = p_des_all[-1]  
-    #     V_val = config.V_2(z, z_des).sum()
-    #     h_list.append(float(h_tail))
-    #     V_list.append(float(V_val))
+    for z in sampled_ys:
+        h_tail = config.h_2(z)[-1]
+        h_tail = jnp.min(config.h_2(z))+30
+        z_des = p_des_all[-1]  
+        V_val = config.V_2(z, z_des).sum()
+        h_list.append(float(h_tail))
+        V_list.append(float(V_val))
 
-    # # Convert to numpy
-    # times_np = onp.array(sampled_ts)
-    # h_np = onp.array(h_list)
-    # V_np = onp.array(V_list)
+    # Convert to numpy
+    times_np = onp.array(sampled_ts)
+    h_np = onp.array(h_list)
+    V_np = onp.array(V_list)
 
-    # # 先组合数据为 (N, 5) 的矩阵
-    # data = onp.stack([times_np, h_np, V_np], axis=1)
+    # 先组合数据为 (N, 5) 的矩阵
+    data = onp.stack([times_np, h_np, V_np], axis=1)
 
-    # # 保存为 CSV，带列名
-    # header = "time,h,V,h_norm,V_norm"
-    # alpha = config.maximum_withhold_force
-    # filename = f"metrics_alpha_{alpha}.csv"
+    # 保存为 CSV，带列名
+    header = "time,h,V,h_norm,V_norm"
+    alpha = config.maximum_withhold_force
+    filename = f"metrics_alpha_{alpha}.csv"
 
-    # onp.savetxt(filename, data, delimiter=",", header=header, comments='', fmt="%.6f")
-    # # Normalize both to [0, 1]
-    # eps = 1e-8  # prevent division by zero
+    onp.savetxt(filename, data, delimiter=",", header=header, comments='', fmt="%.6f")
+    # Normalize both to [0, 1]
+    eps = 1e-8  # prevent division by zero
 
-    # # Plot
-    # plt.figure(figsize=(6, 3))
-    # plt.plot(times_np, h_np, label="Normalized CBF: Tip Safety", linewidth=2)
-    # plt.plot(times_np, V_np, label="Normalized CLF: Tracking", linewidth=2)
-    # plt.xlabel("Time [s]")
-    # plt.ylabel("Normalized Value of CLF/CBF")
-    # plt.legend()
-    # plt.grid(True)
-    # plt.tight_layout()
-    # plt.show()
+    # Plot
+    plt.figure(figsize=(6, 3))
+    plt.plot(times_np, h_np, label="Normalized CBF: Tip Safety", linewidth=2)
+    plt.plot(times_np, V_np, label="Normalized CLF: Tracking", linewidth=2)
+    plt.xlabel("Time [s]")
+    plt.ylabel("Normalized Value of CLF/CBF")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
-    # i_focus = 18 
+    i_focus = 18 
 
     def get_contact_matrix(full_distance_array, threshold=0.0002):
         """Return a boolean contact matrix where distance < threshold."""
@@ -836,7 +809,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     for t_idx, q in enumerate(q_ts[::20]):
         blue_frame_contact_points = extract_multiple_contact_points_by_obs(blue_contact_points_array, t_idx, len(config.poly_obstacle_pos[0]))
         red_frame_contact_points = extract_multiple_contact_points_by_obs(red_contact_points_array, t_idx, len(config.poly_obstacle_pos[0]))
-        current_z_des = q_des_all[current_index]
+        current_z_des = p_des_all[current_index]
         current_z_des, _ = jnp.split(current_z_des,2)
         current_z_des = jnp.stack(jnp.split(current_z_des,num_segments)) #shape(num_segments,3)
 
@@ -850,7 +823,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         ]))
 
         current_index = jnp.where(tracking_error < 0.1,
-                            jnp.minimum(current_index + 1, q_des_all.shape[0]-1),
+                            jnp.minimum(current_index + 1, p_des_all.shape[0]-1),
                             current_index)
 
         img = draw_image(
