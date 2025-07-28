@@ -227,7 +227,7 @@ def compute_distance(robot, poly, alpha_pair=500., alpha_axes=500.):
     axis_gaps = (1/alpha_pair) * logsumexp(alpha_pair * jnp.stack([d1, d2]), axis=0)
 
     h = (1/alpha_axes) * logsumexp(alpha_axes * axis_gaps)
-    separation_flag = jnp.where(h > 0.0, 1, 0)
+    separation_flag = jnp.where(h > 0.014, 1, 0)
     
     return h, separation_flag
 
@@ -478,8 +478,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             self.poly_obstacle_pos_4 = self.poly_obstacle_pos_2[2,:] + self.poly_obstacle_shape_1
 
-            # self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_1,self.poly_obstacle_pos_2,self.poly_obstacle_pos_3,self.poly_obstacle_pos_4])
-            self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_3])
+            self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_1,self.poly_obstacle_pos_2,self.poly_obstacle_pos_3,self.poly_obstacle_pos_4])
+            # self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_3])
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, num_points) # segmented
 
@@ -633,12 +633,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
 
     def compute_artificial_potential_torque(q: jnp.ndarray) -> jnp.ndarray:
-        k = config.contact_spring_constant
+        k = config.contact_spring_constant/3
         obs_poly = config.poly_obstacle_pos  # shape (num_obstacles, num_vertices, 2)
         robot_radius = 2e-2
         robot_params = config.robot_params
         s_ps = config.s_ps
-        d_safe = 0.05  # Safe distance for contact
+        d_safe = 0.0  # Safe distance for contact
 
         # Forward kinematics
         p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # shape (N, 3)
@@ -665,11 +665,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         num_segments = robot_poly.shape[0]
         num_obstacles = obs_poly.shape[0]
 
-        def contact_point_fn(robot_vertices, obs_vertices):
-            cA = jnp.mean(robot_vertices, axis=0)
-            cB = compute_polygon_centroid(obs_vertices)
-            return connect_project_jax(cA, cB, obs_vertices)  # shape (2,)
-
         def segment_obs_interact(i, j, q):
             poly_seg = robot_poly[i]
             poly_obs = obs_poly[j]
@@ -695,7 +690,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                     x_c, _ = find_closest_segment_point_and_direction(poly_seg_, poly_obs)
                     return x_c
 
-                
                 J_c = jacfwd(contact_fk)(q)  # shape (2, n)
                 
                 # jax.debug.print("J_c = {x}", x=J_c)
@@ -793,6 +787,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     tf = 8.0
     dt = 2e-3     # integration step (for manual stepping)
     sim_dt = 1e-3 # simulation dt used by the solver
+
+    dt = 1e-3     # integration step (for manual stepping)
+    sim_dt = 5e-4 # simulation dt used by the solver
 
     imax = 0.5
 
