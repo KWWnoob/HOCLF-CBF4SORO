@@ -379,15 +379,15 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 30 * num_segments) # segmented
 
-            self.q_des_1_1 = jnp.array([-2, 0.1, -0.2])
-            self.q_des_1_2 = jnp.array([-2, 0.1, -0.2]) #bend shear elongation
+            self.q_des_1_1 = jnp.array([6.48852390e+00,  5.62927885e-02, -4.71399263e-01])
+            self.q_des_1_2 = jnp.array([-6.82988735e+00, 1.11650277e+00, -3.27210884e-01]) #bend shear elongation
 
-            self.q_des_2_1 = jnp.array([-10, 0.2, 0.5])
-            self.q_des_2_2 = jnp.array([10, 0.1, 0.3]) #bend shear elongation
+            self.q_des_2_1 = jnp.array([-1.97662728e+01, -1.66824356e+00,  7.54860428e-01])
+            self.q_des_2_2 = jnp.array([1.98242897e+01, -1.44268228e+00,  3.42432095e-01 ]) #bend shear elongation
 
             self.q_des_1 = jnp.stack([self.q_des_1_1,self.q_des_1_2])
             self.q_des_2 = jnp.stack([self.q_des_2_1,self.q_des_2_2])
-            self.q_des_all = jnp.stack([self.q_des_2]) # shape (num_waypoints, num_of_segments, 3)
+            self.q_des_all = jnp.stack([ self.q_des_2]) # shape (num_waypoints, num_of_segments, 3)
 
             # self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.7, -jnp.pi*1.8*robot_length])
             # self.p_des_1_2 = jnp.array([0.06, 0.18234353, 0])
@@ -407,7 +407,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.p_des_2_1 = fk_output[29] 
             self.p_des_2_2 = fk_output[-1]   
             self.p_des_2 = jnp.stack([self.p_des_2_1, self.p_des_2_2])
-            print("p_des_2:", self.p_des_2 )
+            # print("p_des_2:", self.p_des_2 )
 
             # self.p_des_all = jnp.stack([self.p_des_1, self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
             self.p_des_all = jnp.stack([self.q_des_2])
@@ -460,7 +460,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             q, q_d = jnp.split(z, 2)
             z_des, _ = jnp.split(z_des, 2) # get the desired position
             error = jnp.sqrt((q - z_des)**2)
-            return error*10
+            return error
         
     
         

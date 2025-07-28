@@ -410,7 +410,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 3000 #contact force model
-            self.maximum_withhold_force = -20
+            self.maximum_withhold_force = 0
             
             super().__init__(
                 n=6 * num_segments, # number of states
@@ -503,96 +503,144 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     config = SoRoConfig()
     cbf = CBF.from_config(config)
-
-    # def V_2(z, z_des, config) -> jnp.ndarray:
-    #     # Split state into positions (q) and velocities (q_d)
-    #     # z_des is in shape of (num_segments * 3 * 2)
-    #     q, q_d = jnp.split(z, 2)
-    #     z_des, _ = jnp.split(z_des, 2) # get the desired position
-    #     z_des = jnp.stack(jnp.split(z_des,num_segments))
-    #     # Compute forward kinematics for the current configuration.
-    #     p = batched_forward_kinematics_fn(config.robot_params, q, config.s_ps)
-        
-    #     p_list = p[config.indices, :]
-
-    #     # Compute the tracking errors.
-    #     # For the "middle" points, use the first two coordinates.
-    #     error_middle = jnp.concatenate([jnp.sqrt((p_list[i,:2]- z_des[i,:2])**2) for i in range(num_segments-1)])
-    #     # # For the "tip" point, use all coordinates and scale the error by 10.
-    #     error_tip = jnp.sqrt((p_list[num_segments-1, :] - z_des[num_segments-1,:])**2)
-        
-    #     # Concatenate the errors into one vector.
-    #     error = jnp.concatenate([error_middle, error_tip])
-    #     return error
     
+    # @jax.jit
+    # def compute_jacobian(q: jnp.ndarray) -> jnp.ndarray:
+    #     def ends_fk(q_inner):
+    #         p_all = batched_forward_kinematics_fn(robot_params, q_inner, config.s_ps)
+    #         p_seg1 = p_all[29, :2]
+    #         p_seg2 = p_all[59, :2]
+    #         return jnp.concatenate([p_seg1, p_seg2], axis=0)  # shape: (4,)
+
+    #     J = jacfwd(ends_fk)(q)  # shape: (4, 6)
+    #     return J
+
+    # @jax.jit
+    # def compute_J_plus_T(q: jnp.ndarray, q_d: jnp.ndarray) -> jnp.ndarray:
+    #     B, _, _, _, _, _ = dynamical_matrices_fn(robot_params, q, q_d)
+    #     eps = 1e-6
+    #     B_reg = B + eps * jnp.eye(B.shape[0])
+    #     M_inv = jnp.linalg.inv(B_reg)
+
+    #     J = compute_jacobian(q)  # (4, 6)
+    #     JT = J.T                # (6, 4)
+
+    #     Lambda_inv = J @ M_inv @ JT  # (4, 4)
+    #     reg = 1e-6 * jnp.eye(Lambda_inv.shape[0])
+    #     Lambda = jnp.linalg.pinv(Lambda_inv + reg)  # (4, 4)
+
+    #     J_plus_T = M_inv @ JT @ Lambda  # (6, 4)
+    #     return J_plus_T
+
+    # @jax.jit
     # def nominal_controller(z, z_des, e_int=None):
+    #     # Step 1: Split state and desired state
     #     q, q_dot = jnp.split(z, 2)
     #     q_des, _ = jnp.split(z_des, 2)
-    #     q_dot_des = jnp.zeros_like(q)
+    #     q_dot_des = jnp.zeros_like(q)  # assuming static target
 
-    #     # Gains
-    #     Kp = jnp.ones_like(q) * 10.0
-    #     Kd = jnp.ones_like(q) * 1.0
-    #     Ki = jnp.ones_like(q) * 0.5 if e_int is not None else 0.0
+    #     # Step 2: Compute operational space states
+    #     x = batched_forward_kinematics_fn(robot_params, q, config.s_ps)[config.indices, :2]  # shape: (num_segments, 2)
+    #     x_des = batched_forward_kinematics_fn(robot_params, q_des, config.s_ps)[config.indices, :2]
+    #     x_dot = batched_forward_kinematics_fn(robot_params, q_dot, config.s_ps)[config.indices, :2]
+    #     x_dot_des = jnp.zeros_like(x_dot)
 
-    #     # Desired acceleration with optional integral term
-    #     if e_int is not None:
-    #         q_ddot_des = Kp * (q_des - q) + Kd * (q_dot_des - q_dot) + Ki * e_int
-    #     else:
-    #         q_ddot_des = Kp * (q_des - q) + Kd * (q_dot_des - q_dot)
+    #     B, _, _, _, _, _ = dynamical_matrices_fn(robot_params, q, q_dot)
+    #     # Step 3: Flatten for vector ops
+    #     x = x.reshape(-1)
+    #     x_des = x_des.reshape(-1)
+    #     x_dot = x_dot.reshape(-1)
+    #     x_dot_des = x_dot_des.reshape(-1)
 
-    #     # Dynamics
-    #     M, C, G, _, _, _ = dynamical_matrices_fn(robot_params, q, q_dot)
-    #     _, _, G_des, K_des, _, _ = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
+    #     _, _, G, K, _, _ = dynamical_matrices_fn(robot_params, q, q_dot)
 
-    #     # Final torque
-    #     tau = M @ q_ddot_des + G 
+    #     # Step 4: PID in operational space
+    #     Kp = 0.2
+    #     Kd = 0.1
+    #     Ki = 0.01
+
+    #     if e_int is None:
+    #         e_int = jnp.zeros_like(x)
+
+    #     e = x_des - x
+    #     e_dot = x_dot_des - x_dot
+    #     u_op = Kp * e + Kd * e_dot + Ki * e_int # operational space force
+ 
+    #     # Step 5: Compute J_M^{+T}
+    #     J_plus_T = compute_J_plus_T(q, q_dot)  # shape (num_q, num_x)
+    #     _, _, G, K, _, _ = dynamical_matrices_fn(robot_params, q, q_dot)
+    #     # Step 6: Map operational force to torque
+    #     tau = J_plus_T @ u_op + G # shape: (num_q,)
+
     #     return tau
     
+    @jax.jit
     def compute_jacobian(q: jnp.ndarray) -> jnp.ndarray:
-        # Forward kinematics at all points
-        def segment_end_fk(q_inner):
-            p_all = batched_forward_kinematics_fn(robot_params, q_inner, s_ps)
-            return p_all[end_p_ps_indices]  # shape (num_segments, 3)
-
-        # shape: (num_segments, 3, num_q) → reshape to (3*num_segments, num_q)
-        J = jacfwd(segment_end_fk)(q)  # shape = (2, 3, 6)
-        return J.reshape(-1, q.shape[0])  # shape = (6, 6)
-    
-    def compute_J_plus_T(q: jnp.ndarray, q_d: jnp.ndarray) -> jnp.ndarray:
-        B, _, _, _, _, _ = dynamical_matrices_fn(robot_params, q, q_d)  # B = M
-        M_inv = jnp.linalg.inv(B)  # shape: (6, 6)
-        
-        J = compute_jacobian(q)    # shape: (6, 6)
-        JT = J.T                   # shape: (6, 6)
-
-        Lambda_inv = J @ M_inv @ JT   # shape: (6, 6)
-        Lambda = jnp.linalg.inv(Lambda_inv)  # Operational space inertia matrix
-
-        JM_T_plus = M_inv @ JT @ Lambda  # shape: (6, 6)
-        return JM_T_plus
+        def ends_fk(q_inner):
+            p_all = batched_forward_kinematics_fn(robot_params, q_inner, config.s_ps)
+            p_seg1 = p_all[29, :2]
+            p_seg2 = p_all[59, :2]
+            return jnp.concatenate([p_seg1, p_seg2], axis=0)  # shape: (4,)
+        return jacfwd(ends_fk)(q)  # shape: (4, dof)
 
     @jax.jit
-    def nominal_controller(z, z_des, e_int=None):
+    def compute_J_plus_T(q: jnp.ndarray, q_d: jnp.ndarray) -> jnp.ndarray:
+        B, _, _, _, _, _ = dynamical_matrices_fn(robot_params, q, q_d)
+        M_inv = jnp.linalg.inv(B)
+
+        J = compute_jacobian(q)  # (4, 6)
+        JT = J.T                # (6, 4)
+
+        Lambda_inv = J @ M_inv @ JT  # (4, 4)
+        Lambda = jnp.linalg.pinv(Lambda_inv)  # (4, 4)
+
+        Jee = M_inv @ JT @ Lambda  # (6, 4)
+        # jax.debug.print("Jee = {x}", x=J_plus_T)
+        return Jee
+
+    @jax.jit
+    def nominal_controller(z: jnp.ndarray, z_des: jnp.ndarray, e_int=None) -> jnp.ndarray:
+        # Split state
         q, q_dot = jnp.split(z, 2)
-        q_des, _ = jnp.split(z_des, 2)
-        q_dot_des = jnp.zeros_like(q)
+        z_des, _ = jnp.split(z_des, 2)
 
-        # Gains
-        Kp = jnp.ones_like(q) * 5.0
-        Kd = jnp.ones_like(q) * 0.5
-        Ki = jnp.ones_like(q) * 0.1 if e_int is not None else 0.0
+        # Forward kinematics to get current x
+        p_all = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
+        x = p_all[config.indices, :2].reshape(-1)  # (4,)
+        
+        # Jacobian
+        J = compute_jacobian(q)  # shape: (4, dof)
+        Jee = compute_J_plus_T(q, q_dot)  # shape: (4, dof)
+        x_dot = J @ q_dot        # correct x_dot via Jacobian
 
-        # PID control torque directly
-        if e_int is not None:
-            tau = Kp * (q_des - q) + Kd * (q_dot_des - q_dot) + Ki * e_int
-        else:
-            tau = Kp * (q_des - q) + Kd * (q_dot_des - q_dot)
+        # Default target velocity
+        # print(z_des.shape)
+        z_des = z_des.reshape((num_segments, 3))
+        x_des = z_des[:, :2].reshape(-1)
+        x_dot_des = jnp.zeros_like(x_des)
 
-        _, _, _, K_des, _, _ = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
-        _, _, G, _, _, _ = dynamical_matrices_fn(robot_params, q_des, jnp.zeros_like(q_des))
+        # Error terms
+        if e_int is None:
+            e_int = jnp.zeros_like(x)
 
-        return tau + G + K_des
+        e = x_des - x
+        e_dot = x_dot_des - x_dot
+
+        # PID gains
+        Kp = 20.0
+        Kd = 10.0 
+        Ki = 1.0
+
+        # Operational space force
+        _, _, G, K, _, _ = dynamical_matrices_fn(robot_params, q, q_dot)
+        u_op = Kp * e + Kd * e_dot + Ki * e_int + Jee.T@(K)
+        # u_op = Kp * e + Kd * e_dot + Ki * e_int
+
+        # Map force back to joint space
+        tau = J.T @ u_op +G
+        # jax.debug.print("e: {}", e)
+        return tau
+
 
     @jax.jit
     def control_policy_fn(q_des: Array) -> Array:
@@ -634,9 +682,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # z_des is in shape of (num_segments * 3 * 2)
     # p_des_all = (num_waypoints, num_segments, 3)
-    q_des_all = jnp.stack([
-        jnp.concatenate([q.flatten(), jnp.zeros(3 * num_segments)])
-        for q in config.q_des_all
+    p_des_all = jnp.stack([
+        jnp.concatenate([q.flatten(), jnp.zeros(q.flatten().shape)])
+        for q in config.p_des_all
         ])  # shape (num_waypoints, num_segments * 3* 2)
 
     # Time settings.
@@ -645,7 +693,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     dt = 2e-3     # integration step (for manual stepping)
     sim_dt = 1e-3 # simulation dt used by the solver
 
-    imax = 0.5  
+    imax = 0.5
 
     def simulation_step(carry, _):
         """
@@ -653,20 +701,24 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         carry: (t, y, current_index, track_indices, e_int)
         """
         t, y_current, current_index, track_indices, e_int = carry
-        current_z_des = q_des_all[current_index]
+        current_z_des = p_des_all[current_index]
 
-        q, q_d = jnp.split(y_current, 2)
-        q_des, _ = jnp.split(current_z_des, 2)
-        e = q_des - q
-        e_int_new = jnp.clip(e_int + e * dt, -imax, imax)
+        q, _ = jnp.split(y_current, 2)
+        x_des, _ = jnp.split(current_z_des, 2)
+        x_des = x_des.reshape(num_segments, 3) # shape: (num_segments, 3)
+        x_des = x_des[:, :2] # flatten to (num_segments * 2,)
+
+        x = batched_forward_kinematics_fn(config.robot_params, q, config.s_ps)[track_indices, :2]
+
+        e_op = (x_des - x).reshape(-1)  # flatten to (num_segments * 2,)
+        e_int_new = jnp.clip(e_int + e_op * dt, -imax, imax)
 
         def ode_fn(t, y, args):
             z_des, e_int = args
             return closed_loop_ode_fn(t, y, (z_des, e_int)) 
-
         sol = dx.diffeqsolve(
             dx.ODETerm(ode_fn),
-            dx.Heun(),
+            dx.Tsit5(),
             t0=t,
             t1=t + dt,
             dt0=sim_dt,
@@ -675,7 +727,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         )
 
         y_next = sol.ys[-1]
-
+ 
         q, q_d = jnp.split(y_next, 2)
         current_z_des_pos, _ = jnp.split(current_z_des, 2)
         current_z_des_pos = jnp.stack(jnp.split(current_z_des_pos, num_segments))
@@ -683,14 +735,14 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         p = batched_forward_kinematics_fn(config.robot_params, q, config.s_ps)
         end_p_ps = p[track_indices, :2]
 
-        # tracking_error = jnp.sum(jnp.stack([
-        #     jnp.linalg.norm(end_p_ps[i, :] - current_z_des_pos[i, :2])
-        #     for i in range(num_segments)
-        # ]))
-        tracking_error = jnp.linalg.norm(q - current_z_des_pos.flatten())
+        tracking_error = jnp.sum(jnp.stack([
+            jnp.linalg.norm(end_p_ps[i, :] - current_z_des_pos[i, :2])
+            for i in range(num_segments)
+        ]))
+        # tracking_error = jnp.linalg.norm(q - current_z_des_pos.flatten())
 
         new_index = jnp.where(tracking_error < 0.1,
-                            jnp.minimum(current_index + 1, q_des_all.shape[0] - 1),
+                            jnp.minimum(current_index + 1, p_des_all.shape[0] - 1),
                             current_index)
 
         t_next = t + dt
@@ -705,7 +757,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         num_steps = int((tf - t0) / dt)
         
         # Initial carry state: time, initial state, desired position index, and the indicies for tip of each segment
-        e_int0 = jnp.zeros_like(q0)
+        e_int0 = jnp.zeros((num_segments * 2,))
         init_carry = (t0, y0, 0, end_p_ps_indices, e_int0)
 
         final_carry, (ts, ys) = jax.lax.scan(simulation_step, init_carry, None, length=num_steps)
@@ -717,52 +769,44 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # Optionally, split ys if needed (e.g., into q_ts and q_d_ts)
     q_ts, q_d_ts = jnp.split(ys, 2, axis=1)
-    # ---------------------------------------------------
-    # Plot h(x) and V(x) over time & print final values
-    # ---------------------------------------------------
-    h_list = []
-    V_list = []
+    # ————————————————————————————————————————
 
-    sampled_ts = ts[::20]
-    sampled_ys = ys[::20]
+    x_des = config.p_des_all[:, :, :2]  # shape (num_waypoints, num_segments, 2)
+    
+    x_list = []
+    x_des_list = []
 
-    # for z in sampled_ys:
-    #     h_tail = config.h_2(z)[-1]
-    #     h_tail = jnp.min(config.h_2(z))+30
-    #     z_des = p_des_all[-1]  
-    #     V_val = config.V_2(z, z_des).sum()
-    #     h_list.append(float(h_tail))
-    #     V_list.append(float(V_val))
+    for i in range(len(ts)):
+        q = q_ts[i]
+        z_des = x_des[-1].reshape(num_segments, 2)  # shape (4,)
 
-    # # Convert to numpy
-    # times_np = onp.array(sampled_ts)
-    # h_np = onp.array(h_list)
-    # V_np = onp.array(V_list)
+        p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
+        x = p[end_p_ps_indices, :2]
+        x = x.reshape(num_segments, 2)  # shape (num_segments, 2)
 
-    # # 先组合数据为 (N, 5) 的矩阵
-    # data = onp.stack([times_np, h_np, V_np], axis=1)
+        x_list.append(x)
+        x_des_list.append(z_des)
+    
+    # Transfer to numpy for plotting
+    x_arr = onp.stack(x_list)
+    x_des_arr = onp.stack(x_des_list)
 
-    # # 保存为 CSV，带列名
-    # header = "time,h,V,h_norm,V_norm"
-    # alpha = config.maximum_withhold_force
-    # filename = f"metrics_alpha_{alpha}.csv"
+    # Calculate tracking error (Euclidean norm) over time
+    segment_errors = onp.linalg.norm(x_arr - x_des_arr, axis=2)  # shape: (T, num_segments)
 
-    # onp.savetxt(filename, data, delimiter=",", header=header, comments='', fmt="%.6f")
-    # # Normalize both to [0, 1]
-    # eps = 1e-8  # prevent division by zero
+    # Plot: one subplot per segment
+    fig, axs = plt.subplots(1, num_segments, figsize=(12, 4), sharey=True)
 
-    # # Plot
-    # plt.figure(figsize=(6, 3))
-    # plt.plot(times_np, h_np, label="Normalized CBF: Tip Safety", linewidth=2)
-    # plt.plot(times_np, V_np, label="Normalized CLF: Tracking", linewidth=2)
-    # plt.xlabel("Time [s]")
-    # plt.ylabel("Normalized Value of CLF/CBF")
-    # plt.legend()
-    # plt.grid(True)
-    # plt.tight_layout()
-    # plt.show()
+    for seg in range(num_segments):
+        axs[seg].plot(ts, segment_errors[:, seg], label=f"Segment {seg+1} L2 Error", linewidth=2)
+        axs[seg].set_title(f"Segment {seg+1} Tracking Error")
+        axs[seg].set_xlabel("Time [s]")
+        axs[seg].grid(True)
+        axs[seg].legend()
 
-    # i_focus = 18 
+    axs[0].set_ylabel("L2 Tracking Error")
+    plt.tight_layout()
+    plt.show()
 
     def get_contact_matrix(full_distance_array, threshold=0.0002):
         """Return a boolean contact matrix where distance < threshold."""
@@ -886,11 +930,16 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 print(f"⚠️ obs_idx={obs_idx} out of range [0, {num_obs})")
         return result
 
+    pos = jnp.stack([
+        p[:, :2]  # reshapes p to (n, 3) and takes the first two columns from each row
+        for p in config.p_des_all
+        ]) # shape (num_waypoints,num_semgnets,2)
+    
     current_index = 0
     for t_idx, q in enumerate(q_ts[::20]):
         blue_frame_contact_points = extract_multiple_contact_points_by_obs(blue_contact_points_array, t_idx, len(config.poly_obstacle_pos[0]))
         red_frame_contact_points = extract_multiple_contact_points_by_obs(red_contact_points_array, t_idx, len(config.poly_obstacle_pos[0]))
-        current_z_des = q_des_all[current_index]
+        current_z_des = p_des_all[current_index]
         current_z_des, _ = jnp.split(current_z_des,2)
         current_z_des = jnp.stack(jnp.split(current_z_des,num_segments)) #shape(num_segments,3)
 
@@ -904,7 +953,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         ]))
 
         current_index = jnp.where(tracking_error < 0.1,
-                            jnp.minimum(current_index + 1, q_des_all.shape[0]-1),
+                            jnp.minimum(current_index + 1, p_des_all.shape[0]-1),
                             current_index)
 
         img = draw_image(
