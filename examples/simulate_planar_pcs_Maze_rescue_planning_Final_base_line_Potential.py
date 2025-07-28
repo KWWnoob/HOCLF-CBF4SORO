@@ -172,42 +172,6 @@ def compute_gap_along_centers(vertices1, vertices2, eps=1e-3):
     gap = d_norm - (r1 + r2)
     return gap
 
-def compute_distance(robot_vertices, polygon_vertices, epsilon=1e-6):
-    robot_normals = get_normals(robot_vertices)
-    poly_normals  = get_normals(polygon_vertices)
-    candidate_axes = jnp.concatenate([robot_normals, poly_normals], axis=0)
-    
-    proj_robot = robot_vertices @ candidate_axes.T
-    proj_poly  = polygon_vertices @ candidate_axes.T
-    
-    min_R = jnp.min(proj_robot, axis=0)
-    max_R = jnp.max(proj_robot, axis=0)
-    min_P = jnp.min(proj_poly, axis=0)
-    max_P = jnp.max(proj_poly, axis=0)
-    
-    separated_mask = (max_R < min_P - epsilon) | (max_P < min_R - epsilon)
-    
-    penetration = jnp.minimum(max_R, max_P) - jnp.maximum(min_R, min_P)
-    
-    def separated_case(_):
-        gap = compute_gap_along_centers(robot_vertices, polygon_vertices)
-        return gap
-
-    def overlapping_case(_):
-        pen = -jnp.min(penetration)
-        return pen
-
-    is_separated = jnp.any(separated_mask)
-    overall_distance = jax.lax.cond(
-        is_separated,
-        separated_case,
-        overlapping_case,
-        operand=None
-    )
-    
-    flag = jax.lax.cond(is_separated, lambda _: 1, lambda _: 0, operand=None)
-    
-    return overall_distance, flag
 
 def compute_distance(robot, poly, alpha_pair=500., alpha_axes=500.):
     """Two-step LogSumExp distance (no JIT inside)."""
