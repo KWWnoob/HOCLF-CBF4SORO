@@ -60,6 +60,7 @@ strain_basis, forward_kinematics_fn, dynamical_matrices_fn, auxiliary_fns = plan
 
 kinetic_energy_fn = jit(auxiliary_fns["kinetic_energy_fn"])
 potential_energy_fn = jit(auxiliary_fns["potential_energy_fn"])
+jacobian_fn = jit(auxiliary_fns["jacobian_fn"])
 
 # construct batched forward kinematics function
 batched_forward_kinematics_fn = vmap(
@@ -67,7 +68,7 @@ batched_forward_kinematics_fn = vmap(
 )
 
 # segmenting params
-num_points = 50*num_segments
+num_points = 30*num_segments
 # Compute indices: equivalent to
 # [num_points * (i+1)//num_segments - 1 for i in range(num_segments)]
 end_p_ps_indices = (jnp.arange(1, num_segments+1) * num_points // num_segments) - 1
@@ -191,7 +192,7 @@ def compute_distance(robot, poly, alpha_pair=500., alpha_axes=500.):
     axis_gaps = (1/alpha_pair) * logsumexp(alpha_pair * jnp.stack([d1, d2]), axis=0)
 
     h = (1/alpha_axes) * logsumexp(alpha_axes * axis_gaps)
-    separation_flag = jnp.where(h > 0.014, 1, 0)
+    separation_flag = jnp.where(h > 0.021, 1, 0)
     
     return h, separation_flag
 
@@ -383,7 +384,7 @@ def find_closest_segment_point_and_direction(robot: jnp.ndarray, obs: jnp.ndarra
     q_poly2 = q_flat[idx]
 
     # Normalized direction vector from poly1 to poly2
-    vec = q_poly2 - p_poly1
+    vec = p_poly1 - q_poly2
     norm = jnp.linalg.norm(vec) + 1e-8
     dir_vec = vec / norm
 
@@ -596,88 +597,168 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         return Jee
 
 
-    def compute_artificial_potential_torque(q: jnp.ndarray) -> jnp.ndarray:
-        k = config.contact_spring_constant/3
-        obs_poly = config.poly_obstacle_pos  # shape (num_obstacles, num_vertices, 2)
-        robot_radius = 2e-2
-        robot_params = config.robot_params
-        s_ps = config.s_ps
-        d_safe = 0.0  # Safe distance for contact
+    # def compute_artificial_potential_torque(q: jnp.ndarray) -> jnp.ndarray:
+    #     k = config.contact_spring_constant/3
+    #     obs_poly = config.poly_obstacle_pos  # shape (num_obstacles, num_vertices, 2)
+    #     robot_radius = 2e-2
+    #     robot_params = config.robot_params
+    #     s_ps = config.s_ps
+    #     d_safe = 0.0  # Safe distance for contact
 
-        # Forward kinematics
-        p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # shape (N, 3)
-        p_ps = p[:, :2]  # Positions of segments
-        p_theta = p[:, 2]
+    #     # Forward kinematics
+    #     p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # shape (N, 3)
+    #     p_ps = p[:, :2]  # Positions of segments
+    #     p_theta = p[:, 2]
 
-        # Segment starts and ends
-        seg_starts = p_ps[:-1]
-        seg_ends = p_ps[1:]
+    #     # Segment starts and ends
+    #     seg_starts = p_ps[:-1]
+    #     seg_ends = p_ps[1:]
 
-        # === Extend the last segment to 2x length ===
-        last_vec = seg_ends[-1] - seg_starts[-1]
-        new_end = seg_starts[-1] + 2.0 * last_vec
-        seg_ends = seg_ends.at[-1].set(new_end)
+    #     # === Extend the last segment to 2x length ===
+    #     last_vec = seg_ends[-1] - seg_starts[-1]
+    #     new_end = seg_starts[-1] + 2.0 * last_vec
+    #     seg_ends = seg_ends.at[-1].set(new_end)
 
-        # Segment orientations
-        seg_orient = p_theta[:-1]
+    #     # Segment orientations
+    #     seg_orient = p_theta[:-1]
 
-        # Segment polygons
-        robot_poly = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
-            seg_starts, seg_ends, seg_orient, robot_radius
-        )  # shape (N-1, num_vertices, 2)
+    #     # Segment polygons
+    #     robot_poly = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
+    #         seg_starts, seg_ends, seg_orient, robot_radius
+    #     )  # shape (N-1, num_vertices, 2)
 
-        num_segments = robot_poly.shape[0]
-        num_obstacles = obs_poly.shape[0]
+    #     num_segments = robot_poly.shape[0]
+    #     num_obstacles = obs_poly.shape[0]
 
-        def segment_obs_interact(i, j, q):
-            poly_seg = robot_poly[i]
-            poly_obs = obs_poly[j]
-            d, flag = compute_distance(poly_seg, poly_obs)
+    #     def segment_obs_interact(i, j, q):
+    #         poly_seg = robot_poly[i]
+    #         poly_obs = obs_poly[j]
+    #         d, flag = compute_distance(poly_seg, poly_obs)
 
-            def on_contact(_):
-                _, direction = find_closest_segment_point_and_direction(poly_seg, poly_obs)     # shape (2,)
+    #         def on_contact(_):
+    #             _, direction = find_closest_segment_point_and_direction(poly_seg, poly_obs)     # shape (2,)
 
-                penetration = d_safe - d 
-                grad_U_xc = -k * penetration * direction  # ∇_{x_c} U TODO: the NAN is here
+    #             penetration = d_safe - d 
+    #             grad_U_xc = -k * penetration * direction  # ∇_{x_c} U TODO: the NAN is here
 
-                def contact_fk(q_):
-                    p_ = batched_forward_kinematics_fn(robot_params, q_, s_ps)
-                    p_ps_ = p_[:, :2]
-                    p_theta_ = p_[:, 2]
-                    seg_starts_ = p_ps_[:-1]
-                    seg_ends_ = p_ps_[1:]
-                    last_vec_ = seg_ends_[-1] - seg_starts_[-1]
-                    new_end_ = seg_starts_[-1] + 2.0 * last_vec_
-                    seg_ends_ = seg_ends_.at[-1].set(new_end_)
-                    seg_orient_ = p_theta_[:-1]
-                    poly_seg_ = segmented_polygon(seg_starts_[i], seg_ends_[i], seg_orient_[i], robot_radius)
-                    x_c, _ = find_closest_segment_point_and_direction(poly_seg_, poly_obs)
-                    return x_c
+    #             def contact_fk(q_):
+    #                 p_ = batched_forward_kinematics_fn(robot_params, q_, s_ps)
+    #                 p_ps_ = p_[:, :2]
+    #                 p_theta_ = p_[:, 2]
+    #                 seg_starts_ = p_ps_[:-1]
+    #                 seg_ends_ = p_ps_[1:]
+    #                 last_vec_ = seg_ends_[-1] - seg_starts_[-1]
+    #                 new_end_ = seg_starts_[-1] + 2.0 * last_vec_
+    #                 seg_ends_ = seg_ends_.at[-1].set(new_end_)
+    #                 seg_orient_ = p_theta_[:-1]
+    #                 poly_seg_ = segmented_polygon(seg_starts_[i], seg_ends_[i], seg_orient_[i], robot_radius)
+    #                 x_c, _ = find_closest_segment_point_and_direction(poly_seg_, poly_obs)
+    #                 return x_c
 
-                J_c = jacfwd(contact_fk)(q)  # shape (2, n)
+    #             J_c = jacfwd(contact_fk)(q)  # shape (2, n)
                 
-                # jax.debug.print("J_c = {x}", x=J_c)
-                tau_apf = -J_c.T @ grad_U_xc
-                # jax.debug.print("Has NaN: {}", jnp.any(jnp.isnan(direction)))
-                # jax.debug.print("Has Inf: {}", jnp.any(jnp.isinf(direction)))# jax.debug.print("tau_apf = {x}", x=tau_ap
-                return tau_apf
+    #             # jax.debug.print("J_c = {x}", x=J_c)
+    #             tau_apf = -J_c.T @ grad_U_xc
+    #             # jax.debug.print("Has NaN: {}", jnp.any(jnp.isnan(direction)))
+    #             # jax.debug.print("Has Inf: {}", jnp.any(jnp.isinf(direction)))# jax.debug.print("tau_apf = {x}", x=tau_ap
+    #             return tau_apf
 
-            def no_contact(_):
-                return jnp.zeros_like(q)
+    #         def no_contact(_):
+    #             return jnp.zeros_like(q)
 
-            return lax.cond(flag == 0, on_contact, no_contact, operand=None)
+    #         return lax.cond(flag == 0, on_contact, no_contact, operand=None)
 
-        i_idx, j_idx = jnp.meshgrid(jnp.arange(num_segments), jnp.arange(num_obstacles), indexing="ij")
-        i_idx = i_idx.flatten()
-        j_idx = j_idx.flatten()
+    #     i_idx, j_idx = jnp.meshgrid(jnp.arange(num_segments), jnp.arange(num_obstacles), indexing="ij")
+    #     i_idx = i_idx.flatten()
+    #     j_idx = j_idx.flatten()
 
-        @partial(jax.vmap, in_axes=(0, 0, None))
-        def segment_obs_interact_batch(i, j, q):
-            return segment_obs_interact(i, j, q)
+    #     @partial(jax.vmap, in_axes=(0, 0, None))
+    #     def segment_obs_interact_batch(i, j, q):
+    #         return segment_obs_interact(i, j, q)
 
-        tau_all = segment_obs_interact_batch(i_idx, j_idx, q)  # shape (num_pairs, n)
-        tau_total = jnp.sum(tau_all, axis=0)                   # shape (n,)
-        return tau_total
+    #     tau_all = segment_obs_interact_batch(i_idx, j_idx, q)  # shape (num_pairs, n)
+    #     tau_total = jnp.sum(tau_all, axis=0)                   # shape (n,)
+    #     return tau_total
+  # shape (4, dof)
+    batched_jacobian_fn = vmap(
+        jacobian_fn, in_axes=(None, None, 0)
+    )
+    @jax.jit
+    def compute_artificial_potential_torque(q: jnp.ndarray) -> jnp.ndarray:
+            k = config.contact_spring_constant/40
+            obs_poly = config.poly_obstacle_pos  # shape (num_obstacles, num_vertices, 2)
+            robot_radius = 2e-2
+            robot_params = config.robot_params
+            s_ps = config.s_ps
+            d_safe = -0.02  # Safe distance for contact
+
+            # Forward kinematics
+            p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # shape (N, 3)
+            p_ps = p[:, :2]  # Positions of segments
+            p_theta = p[:, 2]
+
+            # Segment starts and ends
+            seg_starts = p_ps[:-1]
+            seg_ends = p_ps[1:]
+
+            # === Extend the last segment to 2x length ===
+            last_vec = seg_ends[-1] - seg_starts[-1]
+            new_end = seg_starts[-1] + 2.0 * last_vec
+            seg_ends = seg_ends.at[-1].set(new_end)
+
+            # Segment orientations
+            seg_orient = p_theta[:-1]
+
+            # Segment polygons
+            robot_poly = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
+                seg_starts, seg_ends, seg_orient, robot_radius
+            )  # shape (N-1, num_vertices, 2)
+
+            num_segments = robot_poly.shape[0]
+            num_obstacles = obs_poly.shape[0]
+
+            def segment_obs_interact(i, j, q):
+                poly_seg = robot_poly[i]
+                poly_obs = obs_poly[j]
+                d, flag = compute_distance(poly_seg, poly_obs)
+
+                def on_contact(_):
+                    x_c, direction = find_closest_segment_point_and_direction(poly_seg, poly_obs)     # shape (2,)
+
+                    penetration = d_safe - d 
+                    grad_U_xc = k * penetration * direction  # ∇_{x_c} U 
+
+                    arm = x_c - p_ps[i]
+                    torque = arm[0] * grad_U_xc[1] - arm[1] * grad_U_xc[0]
+                    wrench = jnp.array([grad_U_xc[0], grad_U_xc[1], torque])  # [fx, fy, τ]
+
+                    return wrench
+
+                def no_contact(_):
+                    return jnp.zeros(3)
+
+                return lax.cond(flag == 0, on_contact, no_contact, operand=None)
+
+            i_idx, j_idx = jnp.meshgrid(jnp.arange(num_segments), jnp.arange(num_obstacles), indexing="ij")
+            i_idx = i_idx.flatten()
+            j_idx = j_idx.flatten()
+
+            @partial(jax.vmap, in_axes=(0, 0, None))
+            def segment_obs_interact_batch(i, j, q):
+                return segment_obs_interact(i, j, q)
+
+            wrench_all = segment_obs_interact_batch(i_idx, j_idx, q)  # shape (num_pairs, n)
+            wrench_all = wrench_all.reshape((num_segments, num_obstacles, -1))  # shape (num_segments, num_obstacles, n)
+            wrench_all = jnp.sum(wrench_all, axis=1)  # shape (num_segments, n)
+            J = batched_jacobian_fn(robot_params, q, s_ps[:-1])  
+
+            @jax.vmap
+            def wrench_to_tau(J_i, wrench_i):
+                return J_i.T @ wrench_i  # (dof,)
+            
+            tau_all = wrench_to_tau(J, wrench_all)  # → (S, dof)
+            tau_total = jnp.sum(tau_all, axis=0)    # → (dof,)
+            return tau_total
 
     # Define the nominal controller
     @jax.jit
@@ -751,9 +832,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     tf = 8.0
     dt = 2e-3     # integration step (for manual stepping)
     sim_dt = 1e-3 # simulation dt used by the solver
-
-    dt = 1e-3     # integration step (for manual stepping)
-    sim_dt = 5e-4 # simulation dt used by the solver
 
     imax = 0.5
 
