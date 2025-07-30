@@ -410,7 +410,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 3000 #contact force model
-            self.maximum_withhold_force = 0
+            self.maximum_withhold_force = -5
             
             super().__init__(
                 n=6 * num_segments, # number of states
@@ -666,7 +666,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         z_des, e_int = args
         q, q_d = jnp.split(y, 2)
         u = nominal_controller(y, z_des, e_int) 
-        # u = cbf.safety_filter(y, u)
+        u = cbf.safety_filter(y, u)
 
         B, C, G, K, D, alpha = dynamical_matrices_fn(robot_params, q, q_d)
         q_dd = jnp.linalg.inv(B) @ (u - C @ q_d - G - K - D @ q_d)
@@ -968,7 +968,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             p_des_all = None,
             index = current_index,
             blue_contact_points= blue_frame_contact_points,
-            red_contact_points= red_frame_contact_points,
+            red_contact_points= None,
             enable_contact=True,
         )
         img_ts.append(img)

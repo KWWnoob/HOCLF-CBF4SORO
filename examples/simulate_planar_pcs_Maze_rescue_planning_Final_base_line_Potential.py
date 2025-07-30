@@ -192,7 +192,7 @@ def compute_distance(robot, poly, alpha_pair=500., alpha_axes=500.):
     axis_gaps = (1/alpha_pair) * logsumexp(alpha_pair * jnp.stack([d1, d2]), axis=0)
 
     h = (1/alpha_axes) * logsumexp(alpha_axes * axis_gaps)
-    separation_flag = jnp.where(h > 0.021, 1, 0)
+    separation_flag = jnp.where(h > 0.02, 1, 0)
     
     return h, separation_flag
 
@@ -359,7 +359,7 @@ def segment_segment_closest_points(a0, a1, b0, b1):
     return p_closest, q_closest, dist
 
 @jax.jit
-def find_closest_segment_point_and_direction(robot: jnp.ndarray, obs: jnp.ndarray):
+def find_closest_segment_point_and_direction(robot: jnp.ndarray, obs: jnp.ndarray, flag: bool = True):
     poly1 = robot
     poly2 = obs
     seg1_start = poly1
@@ -383,10 +383,13 @@ def find_closest_segment_point_and_direction(robot: jnp.ndarray, obs: jnp.ndarra
     p_poly1 = p_flat[idx]
     q_poly2 = q_flat[idx]
 
-    # Normalized direction vector from poly1 to poly2
+    # Vector and norm
     vec = p_poly1 - q_poly2
     norm = jnp.linalg.norm(vec) + 1e-8
     dir_vec = vec / norm
+
+    # Conditionally flip the direction
+    dir_vec = lax.cond(flag, lambda x: x, lambda x: -x, dir_vec)
 
     return p_poly1, dir_vec
 
@@ -685,12 +688,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     )
     @jax.jit
     def compute_artificial_potential_torque(q: jnp.ndarray) -> jnp.ndarray:
-            k = config.contact_spring_constant/40
+            k = config.contact_spring_constant/10
             obs_poly = config.poly_obstacle_pos  # shape (num_obstacles, num_vertices, 2)
             robot_radius = 2e-2
             robot_params = config.robot_params
             s_ps = config.s_ps
-            d_safe = -0.02  # Safe distance for contact
+            d_safe = 0.0 # Safe distance for contact
 
             # Forward kinematics
             p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # shape (N, 3)
@@ -723,7 +726,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 d, flag = compute_distance(poly_seg, poly_obs)
 
                 def on_contact(_):
-                    x_c, direction = find_closest_segment_point_and_direction(poly_seg, poly_obs)     # shape (2,)
+                    x_c, direction = find_closest_segment_point_and_direction(poly_seg, poly_obs, flag)     # shape (2,)
 
                     penetration = d_safe - d 
                     grad_U_xc = k * penetration * direction  # ∇_{x_c} U 
