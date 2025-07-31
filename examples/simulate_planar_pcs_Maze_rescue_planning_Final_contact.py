@@ -425,7 +425,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 3000 #contact force model
-            self.maximum_withhold_force = 10
+            self.maximum_withhold_force = -0.002*3000
             
             super().__init__(
                 n=6 * num_segments, # number of states
@@ -434,8 +434,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 # parameter already, balancing the CLF and CBF constraints.
                 relax_cbf=True,
                 # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
-                cbf_relaxation_penalty=1e5,
-                clf_relaxation_penalty=10
+                cbf_relaxation_penalty=1e8,
+                clf_relaxation_penalty=1000
             )
 
         def f(self, z) -> Array:
@@ -544,10 +544,10 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             # return jnp.array([1.0])
                     
         def alpha_2(self, h_2):
-            return h_2*10 #constant, increase for smaller affected zone
+            return h_2*100 #constant, increase for smaller affected zone
         
         def gamma_2(self, v_2):
-            return v_2*10
+            return v_2*100
 
     config = SoRoConfig()
     clf_cbf = CLFCBF.from_config(config)
@@ -713,7 +713,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     for z, u in zip(sampled_ys, sampled_us):
         # h_tail = jnp.min(config.h_2(z)) + (10 - config.maximum_withhold_force)
-        h_tail = jnp.min(config.h_2(z)) 
+        h_tail = - jnp.min(config.h_2(z)-config.maximum_withhold_force) 
+        h_tail = 0 if h_tail < 0 else h_tail
         # safety = self.maximum_withhold_force + penetration_depth_poly*self.contact_spring_constant
         z_des = p_des_all[-1]  
         V_val = config.V_2(z, z_des).sum()

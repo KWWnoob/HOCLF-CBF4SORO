@@ -693,7 +693,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             robot_radius = 2e-2
             robot_params = config.robot_params
             s_ps = config.s_ps
-            d_safe = 0.0 # Safe distance for contact
+            d_safe = 0.002 # Safe distance for contact
 
             # Forward kinematics
             p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # shape (N, 3)
