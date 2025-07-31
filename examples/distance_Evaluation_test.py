@@ -25,8 +25,8 @@ def smooth_abs(x: jnp.ndarray, alpha: float) -> jnp.ndarray:
 def compute_distance_smoothabs(
     robot: jnp.ndarray,
     poly: jnp.ndarray,
-    alpha_axes: float = 30.,
-    alpha_sabs: float = 30.
+    alpha_axes: float = 20.,
+    alpha_sabs: float = 20.
 ) -> float:
     """
     Fused, JAX-optimized version of compute_distance_smoothabs.
@@ -59,7 +59,7 @@ def compute_distance_smoothabs(
 
 # === Main distance function: One-LogSAT with shift ===
 @jax.jit
-def compute_distance_onelogminus(robot: jnp.ndarray, poly: jnp.ndarray, alpha: float = 30.0) -> float:
+def compute_distance_onelogminus(robot: jnp.ndarray, poly: jnp.ndarray, alpha: float = 20.0) -> float:
     """
     Smoothed one-log version of SAT-based polygon separation distance.
 
@@ -220,64 +220,95 @@ def pad_polygon(poly: np.ndarray, target_N: int) -> np.ndarray:
     return np.pad(poly, ((0, pad_len), (0, 0)), mode='constant')
 
 if __name__ == "__main__":
-    polygon_sizes = [4, 8, 16, 32, 64, 128, 256]
-    outer_repeats = 10  # number of outer average loops
-    n_repeat_dist = 1000  # number of distance evaluation runs
+    batched_xtanh = jax.jit(jax.vmap(compute_distance_smoothabs, in_axes=(0, 0, None, None)))
+    batched_onelog = jax.jit(jax.vmap(compute_distance_onelogminus, in_axes=(0, 0, None)))
+    batched_sat = jax.jit(jax.vmap(compute_distance_sat, in_axes=(0, 0)))  # 你需要定义好 sat 函数
 
-    print("    N   | xtanh(ms) | onelog(ms) | SAT(ms) | speedup | xtanh_rel_err | onelog_rel_err")
-    print("--------+-----------+------------+---------+---------+----------------+----------------")
+    def pad_polygon(poly: np.ndarray, target_N: int) -> np.ndarray:
+        pad_len = target_N - poly.shape[0]
+        return np.pad(poly, ((0, pad_len), (0, 0)), mode='constant')
+
+    polygon_sizes = [4, 8, 16, 32, 64]
+    outer_repeats = 1000
+    batch_n = 32
+
+    print("    N   | xtanh(ms) | onelog(ms) | SAT(ms) | speedup | xtanh_err (%) [min,max] | onelog_err (%) [min,max]")
+    print("--------+-----------+------------+---------+---------+--------------------------+---------------------------")
+
 
     for N in polygon_sizes:
-        # Generate polygons
-        A = regular_ngon(4, radius=1.0)
-        B = irregular_ngon(N, radius=5.0)
-        B_aligned = align_polygons_for_contact(A, B)
-        A_j = jnp.array(A)
-        B_j = jnp.array(B_aligned)
+        # === Generate polygon batches ===
+        As = [regular_ngon(4, radius=1.0) for _ in range(batch_n)]
+        Bs = [irregular_ngon(N, radius=5.0, seed=100 + i) for i in range(batch_n)]
+        B_aligneds = [align_polygons_for_contact(A, B) for A, B in zip(As, Bs)]
+        max_N = max(p.shape[0] for p in B_aligneds)
 
-        # JIT warmup
-        _ = xtanh_jit(A_j, B_j).block_until_ready()
-        _ = onelog_jit(A_j, B_j).block_until_ready()
-        _ = sat_jit(A_j, B_j).block_until_ready()
+        A_batch = jnp.array(As)  # (batch, 4, 2)
+        B_batch = jnp.array([pad_polygon(B, max_N) for B in B_aligneds])  # (batch, max_N, 2)
 
-        # Time benchmarking
-        sum_xtanh = sum_one = sum_sat = 0.0
-        for _ in range(outer_repeats):
-            sum_xtanh += benchmark(xtanh_jit, A_j, B_j, n=1000)
-            sum_one   += benchmark(onelog_jit, A_j, B_j, n=1000)
-            sum_sat   += benchmark(sat_jit, A_j, B_j, n=1000)
+        # === Warmup ===
+        _ = batched_xtanh(A_batch, B_batch, 30., 30.).block_until_ready()
+        _ = batched_onelog(A_batch, B_batch, 30.).block_until_ready()
+        _ = batched_sat(A_batch, B_batch).block_until_ready()
 
-        avg_xtanh = sum_xtanh / outer_repeats
-        avg_one   = sum_one / outer_repeats
-        avg_sat   = sum_sat / outer_repeats
-        speedup   = avg_xtanh / avg_one if avg_one > 0 else float('nan')
+        # === Timed batch evaluation ===
+        def time_fn(fn, *args):
+            times = []
+            for _ in range(outer_repeats):
+                t0 = time.perf_counter()
+                out = fn(*args)
+                _ = out.block_until_ready()
+                t1 = time.perf_counter()
+                times.append(t1 - t0)
+            return np.mean(times) * 1e3  # ms per pair
 
-        # Distance evaluation: average over n_repeat_dist
-        sum_d_xtanh = 0.0
-        sum_d_onelog = 0.0
-        sum_d_sat = 0.0
+        t_xtanh = time_fn(batched_xtanh, A_batch, B_batch, 30., 30.)
+        t_onelog = time_fn(batched_onelog, A_batch, B_batch, 30.)
+        t_sat = time_fn(batched_sat, A_batch, B_batch)
+        speedup = t_xtanh / t_onelog if t_onelog > 0 else float('nan')
 
-        sum_d_xtanh  += float(xtanh_jit(A_j, B_j))
-        sum_d_onelog += float(onelog_jit(A_j, B_j))
-        sum_d_sat    += float(sat_jit(A_j, B_j))
+        # === 误差评估（逐对） ===
+        sum_xtanh_d = sum_onelog_d = 0.0
+        xtanh_err_list = []
+        onelog_err_list = []
+        radius_sum = 0.0
 
-        d_xtanh  = sum_d_xtanh / n_repeat_dist
-        d_onelog = sum_d_onelog / n_repeat_dist
-        d_sat    = sum_d_sat / n_repeat_dist
+        for A, B in zip(As, B_aligneds):
+            d_sat = float(sat_jit(jnp.array(A), jnp.array(B)))
+            d_xtanh = float(xtanh_jit(jnp.array(A), jnp.array(B)))
+            d_onelog = float(onelog_jit(jnp.array(A), jnp.array(B)))
+            r = average_polygon_radius(np.array(B))
+            radius_sum += r
 
-        eps = 1e-8  # numerical safety
-        obstacle_radius = average_polygon_radius(B_aligned)
-        normalized_d_onelog = (d_onelog-d_sat) / (obstacle_radius)
-        normalized_d_xtanh = (d_xtanh-d_sat) / (obstacle_radius)
+            xtanh_err_list.append((d_xtanh - d_sat) / r)
+            onelog_err_list.append((d_onelog - d_sat) / r)
 
-        print(f"{N:7d} | {avg_xtanh:9.3f} | {avg_one:10.3f} | {avg_sat:7.3f} | {speedup:7.2f} |"
-              f"     {normalized_d_xtanh:+.6f}   |   {normalized_d_onelog:+.6f}")
+        xtanh_err_array = np.array(xtanh_err_list)
+        onelog_err_array = np.array(onelog_err_list)
+
+        rel_err_xtanh_mean = np.mean(xtanh_err_array)
+        rel_err_onelog_mean = np.mean(onelog_err_array)
+
+        rel_err_xtanh_min = np.min(xtanh_err_array)
+        rel_err_xtanh_max = np.max(xtanh_err_array)
+
+        rel_err_onelog_min = np.min(onelog_err_array)
+        rel_err_onelog_max = np.max(onelog_err_array)
+
+        # print(f"{N:7d} | {t_xtanh:9.3f} | {t_onelog:10.3f} | {t_sat:7.3f} | {speedup:7.2f} |"
+        #     f"     {rel_err_xtanh:+.6f}   |   {rel_err_onelog:+.6f}")
+
+        print(f"{N:7d} | {t_xtanh:9.3f} | {t_onelog:10.3f} | {t_sat:7.3f} | {speedup:7.2f} |"
+      f" {rel_err_xtanh_mean:+.6f} [{rel_err_xtanh_min:+.3f}, {rel_err_xtanh_max:+.3f}] |"
+      f" {rel_err_onelog_mean:+.6f} [{rel_err_onelog_min:+.3f}, {rel_err_onelog_max:+.3f}]")
+
+
         
     def pad_polygon(poly: np.ndarray, target_N: int) -> np.ndarray:
         pad_len = target_N - poly.shape[0]
         return np.pad(poly, ((0, pad_len), (0, 0)), mode='constant')
 
-    batch_sizes = [1, 10, 100, 1000]
+    batch_sizes = [32, 64, 128, 256]
     polygon_N = 8
     repeats = 10
 
@@ -311,9 +342,9 @@ if __name__ == "__main__":
                 _ = out.block_until_ready()
                 t1 = time.perf_counter()
                 times.append(t1 - t0)
-            return np.mean(times) / batch_size * 1e3  # ms per pair
+            return np.mean(times) * 1e3  # ms per pair
 
         t_xtanh = time_fn(batched_xtanh, A_batch, B_batch, 30., 30.)
         t_onelog = time_fn(batched_onelog, A_batch, B_batch, 30.)
 
-        print(f"{batch_size:10d} |     {t_xtanh:10.4f}     |     {t_onelog:10.4f}     |  {t_xtanh / t_onelog:6.2f}x")
+        print(f"{batch_size:10d} |     {t_xtanh:10.4f}     |     {t_onelog:10.4f}     |  {t_xtanh / t_onelog:6.2f}")
