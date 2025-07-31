@@ -6,7 +6,7 @@ import csv
 import diffrax as dx
 from functools import partial
 import jax
-from cbfpy.cbfpy.cbfs.clf_cbf import CLFCBF, CLFCBFConfig
+from cbfpy.cbfs.clf_cbf import CLFCBF, CLFCBFConfig
 import inspect
 from jax.scipy.special import logsumexp
 
@@ -432,9 +432,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 m=3 * num_segments, # number of inputs
                 # Note: Relaxing the CLF-CBF QP is tricky because there is an additional relaxation
                 # parameter already, balancing the CLF and CBF constraints.
-                relax_cbf=False,
+                relax_cbf=True,
                 # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
-                cbf_relaxation_penalty=1e8,
+                cbf_relaxation_penalty=1e5,
                 clf_relaxation_penalty=10
             )
 
@@ -474,7 +474,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             # Compute the tracking errors.
             # For the "middle" points, use the first two coordinates.
-            error_middle = jnp.concatenate([jnp.sqrt((p_list[i,:]- z_des[i,:])**2) for i in range(num_segments-1)])
+            error_middle = jnp.concatenate([jnp.sqrt((p_list[i,:2]- z_des[i,:2])**2) for i in range(num_segments-1)])
             # # For the "tip" point, use all coordinates and scale the error by 10.
             error_tip = jnp.sqrt((p_list[num_segments-1, :] - z_des[num_segments-1,:])**2)
 
@@ -484,69 +484,70 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             return error
         
         def h_2(self, z) -> jnp.ndarray:
-            # """
-            # Computes the safety force (barrier function output) for the robot given its state 'z',
-            # considering both polygonal and circular obstacles.
+            """
+            Computes the safety force (barrier function output) for the robot given its state 'z',
+            considering both polygonal and circular obstacles.
             
-            # Args:
-            #     z: A JAX array representing the state, typically a concatenation of positions q and velocities q_d.
+            Args:
+                z: A JAX array representing the state, typically a concatenation of positions q and velocities q_d.
             
-            # Returns:
-            #     A JAX array representing the combined smooth force.
-            # """
-            # # Split the state vector into positions (q) and velocities (q_d)
-            # q, q_d = jnp.split(z, 2)
+            Returns:
+                A JAX array representing the combined smooth force.
+            """
+            # Split the state vector into positions (q) and velocities (q_d)
+            q, q_d = jnp.split(z, 2)
             
-            # # Compute the forward kinematics for the robot
-            # p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
+            # Compute the forward kinematics for the robot
+            p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
             
-            # # Extract positions and orientations from the forward kinematics output.
-            # p_ps = p[:, :2]         # Positions, shape: (N, 2)
-            # p_orientation = p[:, 2]   # Orientations, shape: (N,)
+            # Extract positions and orientations from the forward kinematics output.
+            p_ps = p[:, :2]         # Positions, shape: (N, 2)
+            p_orientation = p[:, 2]   # Orientations, shape: (N,)
             
-            # # -------- Process the polygon obstacles --------
-            # # Assuming self.poly_obstacle_pos is now a stacked array of obstacles
-            # # with shape (num_obstacles, num_vertices, 2)
+            # -------- Process the polygon obstacles --------
+            # Assuming self.poly_obstacle_pos is now a stacked array of obstacles
+            # with shape (num_obstacles, num_vertices, 2)
             
-            # # Consider segments between consecutive points (excluding the last point for segments)
-            # current_points = p_ps[:-1]
-            # next_points = jnp.concatenate([p_ps[1:-1] * 1, p_ps[-1][None, :]])
-            # orientations = p_orientation[:-1]
+            # Consider segments between consecutive points (excluding the last point for segments)
+            current_points = p_ps[:-1]
+            next_points = jnp.concatenate([p_ps[1:-1] * 1, p_ps[-1][None, :]])
+            orientations = p_orientation[:-1]
             
-            # def segment_robot(current,next,orientation):
-            #     seg_poly = segmented_polygon(current, next, orientation, robot_radius)
-            #     return(seg_poly)
+            def segment_robot(current,next,orientation):
+                seg_poly = segmented_polygon(current, next, orientation, robot_radius)
+                return(seg_poly)
             
-            # robot_poly = jax.vmap(segment_robot)(current_points, next_points, orientations)
+            robot_poly = jax.vmap(segment_robot)(current_points, next_points, orientations)
 
-            # pairwise_penetration,_ = jax.vmap( lambda poly: jax.vmap(lambda obs: compute_distance(poly, obs))(self.poly_obstacle_pos)
-            #                                 )(robot_poly)
+            pairwise_penetration,_ = jax.vmap( lambda poly: jax.vmap(lambda obs: compute_distance(poly, obs))(self.poly_obstacle_pos)
+                                            )(robot_poly)
             
-            # end_start = p_ps[-2]
-            # end_end = p_ps[-1]
-            # d = (end_end - end_start)/jnp.linalg.norm(end_end - end_start)
-            # angle = jnp.arctan2(d[1], d[0])
+            end_start = p_ps[-2]
+            end_end = p_ps[-1]
+            d = (end_end - end_start)/jnp.linalg.norm(end_end - end_start)
+            angle = jnp.arctan2(d[1], d[0])
 
-            # robot_tip = half_circle_to_polygon(p_ps[-1],angle, robot_radius)
-            # tip_penetration,_ = jax.vmap(compute_distance, in_axes=(0, None))(self.poly_obstacle_pos, robot_tip)
-            # tip_penetration = tip_penetration[None,...]
+            robot_tip = half_circle_to_polygon(p_ps[-1],angle, robot_radius)
+            tip_penetration,_ = jax.vmap(compute_distance, in_axes=(0, None))(self.poly_obstacle_pos, robot_tip)
+            tip_penetration = tip_penetration[None,...]
 
-            # penetration_depth_poly = jnp.concatenate([pairwise_penetration,tip_penetration])
-            # penetration_depth_poly = penetration_depth_poly.reshape(-1)
+            penetration_depth_poly = jnp.concatenate([pairwise_penetration,tip_penetration])
+            penetration_depth_poly = penetration_depth_poly.reshape(-1)
 
         
-            # # safe_distance = jnp.concatenate([penetration_depth_poly], axis=0)
-            # # force = penetration_to_contact_force(penetration_depth_poly,self.contact_spring_constant)
-            # safety = self.maximum_withhold_force + penetration_depth_poly*self.contact_spring_constant
-            # # print(safety.shape)
-            # # return safe_distance*self.contact_spring_constant
-            return jnp.array([1.0])
+            # safe_distance = jnp.concatenate([penetration_depth_poly], axis=0)
+            # force = penetration_to_contact_force(penetration_depth_poly,self.contact_spring_constant)
+            safety = self.maximum_withhold_force + penetration_depth_poly*self.contact_spring_constant
+            return safety
+            # print(safety.shape)
+            # return safe_distance*self.contact_spring_constant
+            # return jnp.array([1.0])
                     
         def alpha_2(self, h_2):
-            return h_2*1 #constant, increase for smaller affected zone
+            return h_2*10 #constant, increase for smaller affected zone
         
         def gamma_2(self, v_2):
-            return v_2*50
+            return v_2*10
 
     config = SoRoConfig()
     clf_cbf = CLFCBF.from_config(config)
@@ -583,7 +584,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
 # Time settings.
     t0 = 0.0
-    tf = 12.0
+    tf = 8.0
     dt = 2e-3     # integration step (for manual stepping)
     sim_dt = 1e-3 # simulation dt used by the solver
 
@@ -711,7 +712,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     u_maxval_list = []
 
     for z, u in zip(sampled_ys, sampled_us):
-        h_tail = jnp.min(config.h_2(z)) + (10 - config.maximum_withhold_force)
+        # h_tail = jnp.min(config.h_2(z)) + (10 - config.maximum_withhold_force)
+        h_tail = jnp.min(config.h_2(z)) 
+        # safety = self.maximum_withhold_force + penetration_depth_poly*self.contact_spring_constant
         z_des = p_des_all[-1]  
         V_val = config.V_2(z, z_des).sum()
         h_list.append(float(h_tail))

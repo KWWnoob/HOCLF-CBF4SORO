@@ -6,7 +6,8 @@ from jax.scipy.special import logsumexp
 from functools import partial
 from scipy.spatial import ConvexHull
 import matplotlib.pyplot as plt
-
+jax.config.update("jax_enable_x64", True)  # double precision
+jax.config.update("jax_platform_name", "cpu")  # use CPU
 # ——— Distance function implementations ———
 
 @jax.jit

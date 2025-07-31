@@ -410,7 +410,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 3000 #contact force model
-            self.maximum_withhold_force = -5
+            self.maximum_withhold_force = 15
             
             super().__init__(
                 n=6 * num_segments, # number of states
@@ -488,7 +488,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             tip_penetration,_ = jax.vmap(compute_distance, in_axes=(0, None))(self.poly_obstacle_pos, robot_tip)
             tip_penetration = tip_penetration[None,...]
 
-            penetration_depth_poly = jnp.concatenate([pairwise_penetration,tip_penetration])+0.0005
+            penetration_depth_poly = jnp.concatenate([pairwise_penetration,tip_penetration])
             penetration_depth_poly = penetration_depth_poly.reshape(-1)
         
             # safe_distance = jnp.concatenate([penetration_depth_poly], axis=0)
@@ -499,7 +499,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             return safety
                     
         def alpha_2(self, h_2):
-            return h_2*30 #constant, increase for smaller affected zone
+            return h_2*50 #constant, increase for smaller affected zone
 
     config = SoRoConfig()
     cbf = CBF.from_config(config)
@@ -770,6 +770,41 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     # Optionally, split ys if needed (e.g., into q_ts and q_d_ts)
     q_ts, q_d_ts = jnp.split(ys, 2, axis=1)
     # ————————————————————————————————————————
+    
+        # Downsample for plotting and saving
+    sampled_ts = ts[::20]
+    sampled_ys = ys[::20]
+
+    h_list = []
+    V_list = []
+
+    for z in sampled_ys:
+        # h_tail = jnp.min(config.h_2(z)) + (10 - config.maximum_withhold_force)
+        h_tail = jnp.min(config.h_2(z)) 
+        # safety = self.maximum_withhold_force + penetration_depth_poly*self.contact_spring_constant
+        h_list.append(float(h_tail))
+
+    # Convert all to numpy
+    times_np = onp.array(sampled_ts)
+    h_np = onp.array(h_list)
+
+    # Combine all data
+    data = onp.concatenate([
+        times_np[:, None],     # (N, 1)
+        h_np[:, None],         # (N, 1)
+    ], axis=1)
+
+
+    # Plot
+    plt.figure(figsize=(6, 3))
+    plt.plot(times_np, h_np, label="Normalized CBF: Tip Safety", linewidth=2)
+    plt.xlabel("Time [s]")
+    plt.ylabel("Normalized Value of CBF")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
 
     x_des = config.p_des_all[:, :, :2]  # shape (num_waypoints, num_segments, 2)
     
