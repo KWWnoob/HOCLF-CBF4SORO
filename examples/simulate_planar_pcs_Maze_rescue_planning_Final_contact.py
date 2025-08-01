@@ -425,7 +425,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 3000 #contact force model
-            self.maximum_withhold_force = -0.002*3000
+            self.maximum_withhold_force = -0.005*3000
             
             super().__init__(
                 n=6 * num_segments, # number of states
@@ -738,25 +738,25 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         us_np                  # (N, m)
     ], axis=1)
 
-    # Create header
-    u_headers = [f"u_{i}" for i in range(us_np.shape[1])]
-    header = "time,h,V,u_max," + ",".join(u_headers)
+    # # Create header
+    # u_headers = [f"u_{i}" for i in range(us_np.shape[1])]
+    # header = "time,h,V,u_max," + ",".join(u_headers)
 
-    # Save to CSV
-    alpha = config.maximum_withhold_force
-    filename = f"metrics_with_u_alpha_{alpha}.csv"
-    onp.savetxt(filename, data, delimiter=",", header=header, comments='', fmt="%.6f")
+    # # Save to CSV
+    # alpha = config.maximum_withhold_force
+    # filename = f"metrics_with_u_alpha_{alpha}.csv"
+    # onp.savetxt(filename, data, delimiter=",", header=header, comments='', fmt="%.6f")
 
-    # Plot
-    plt.figure(figsize=(6, 3))
-    plt.plot(times_np, h_np, label="Normalized CBF: Tip Safety", linewidth=2)
-    plt.plot(times_np, V_np, label="Normalized CLF: Tracking", linewidth=2)
-    plt.xlabel("Time [s]")
-    plt.ylabel("Normalized Value of CLF/CBF")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    # # Plot
+    # plt.figure(figsize=(6, 3))
+    # plt.plot(times_np, h_np, label="Normalized CBF: Tip Safety", linewidth=2)
+    # plt.plot(times_np, V_np, label="Normalized CLF: Tracking", linewidth=2)
+    # plt.xlabel("Time [s]")
+    # plt.ylabel("Normalized Value of CLF/CBF")
+    # plt.legend()
+    # plt.grid(True)
+    # plt.tight_layout()
+    # plt.show()
 
     i_focus = 18 
 
