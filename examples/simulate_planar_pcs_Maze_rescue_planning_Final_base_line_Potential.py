@@ -394,25 +394,6 @@ def find_closest_segment_point_and_direction(robot: jnp.ndarray, obs: jnp.ndarra
     return p_poly1, dir_vec
 
 
-def penetration_to_contact_force(
-    penetration_depth: jnp.ndarray,
-    k_contact: float
-) -> jnp.ndarray:
-    """
-    Piecewise-smooth contact force model:
-        F(d) = -k * d     if d <= 0
-             = 0         if d > 0
-
-    Args:
-        penetration_depth: jnp.ndarray, signed distances (positive = separated)
-        k_contact: contact spring constant
-
-    Returns:
-        jnp.ndarray of contact forces (>= 0 when in contact)
-    """
-    force = -k_contact * penetration_depth
-    return jnp.where(penetration_depth <= 0, force, 0.0)
-
 def soft_robot_with_safety_contact_CBFCLF_example():
     
     # define the ODE function

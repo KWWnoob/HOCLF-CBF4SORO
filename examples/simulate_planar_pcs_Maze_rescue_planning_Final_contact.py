@@ -12,7 +12,7 @@ from jax.scipy.special import logsumexp
 
 jax.config.update("jax_enable_x64", True)  # double precision
 jax.config.update("jax_platform_name", "cpu")  # use CPU
-from jax import Array, debug, jacfwd, jit, vmap, lax
+from jax import Array, config, debug, jacfwd, jit, vmap, lax
 from jax import numpy as jnp
 import jsrm
 from jsrm.systems import planar_pcs
@@ -59,6 +59,7 @@ strain_basis, forward_kinematics_fn, dynamical_matrices_fn, auxiliary_fns = plan
 
 kinetic_energy_fn = jit(auxiliary_fns["kinetic_energy_fn"])
 potential_energy_fn = jit(auxiliary_fns["potential_energy_fn"])
+jacobian_fn = jit(auxiliary_fns["jacobian_fn"])
 
 # construct batched forward kinematics function
 batched_forward_kinematics_fn = vmap(
@@ -66,7 +67,7 @@ batched_forward_kinematics_fn = vmap(
 )
 
 # segmenting params
-num_points = 30*num_segments
+num_points = 20*num_segments
 # Compute indices: equivalent to
 # [num_points * (i+1)//num_segments - 1 for i in range(num_segments)]
 end_p_ps_indices = (jnp.arange(1, num_segments+1) * num_points // num_segments) - 1
@@ -171,65 +172,6 @@ def compute_gap_along_centers(vertices1, vertices2, eps=1e-3):
     gap = d_norm - (r1 + r2)
     return gap
 
-def compute_distance(robot_vertices, polygon_vertices, epsilon=1e-6):
-    robot_normals = get_normals(robot_vertices)
-    poly_normals  = get_normals(polygon_vertices)
-    candidate_axes = jnp.concatenate([robot_normals, poly_normals], axis=0)
-    
-    proj_robot = robot_vertices @ candidate_axes.T
-    proj_poly  = polygon_vertices @ candidate_axes.T
-    
-    min_R = jnp.min(proj_robot, axis=0)
-    max_R = jnp.max(proj_robot, axis=0)
-    min_P = jnp.min(proj_poly, axis=0)
-    max_P = jnp.max(proj_poly, axis=0)
-    
-    separated_mask = (max_R < min_P - epsilon) | (max_P < min_R - epsilon)
-    
-    penetration = jnp.minimum(max_R, max_P) - jnp.maximum(min_R, min_P)
-    
-    def separated_case(_):
-        gap = compute_gap_along_centers(robot_vertices, polygon_vertices)
-        return gap
-
-    def overlapping_case(_):
-        pen = -jnp.min(penetration)
-        return pen
-
-    is_separated = jnp.any(separated_mask)
-    overall_distance = jax.lax.cond(
-        is_separated,
-        separated_case,
-        overlapping_case,
-        operand=None
-    )
-    
-    flag = jax.lax.cond(is_separated, lambda _: 1, lambda _: 0, operand=None)
-    
-    return overall_distance, flag
-
-def compute_distance(robot, poly, alpha_pair=500., alpha_axes=500.):
-    """Two-step LogSumExp distance (no JIT inside)."""
-    def get_normals(v):
-        e = jnp.roll(v, -1, axis=0) - v
-        n = jnp.stack([-e[:,1], e[:,0]], axis=1)
-        return n / jnp.linalg.norm(n, axis=1, keepdims=True)
-    Rn = get_normals(robot)
-    Pn = get_normals(poly)
-    axes = jnp.concatenate([Rn, Pn], axis=0)
-    prj_R = robot @ axes.T
-    prj_P = poly @ axes.T
-    Rmin, Rmax = prj_R.min(0), prj_R.max(0)
-    Pmin, Pmax = prj_P.min(0), prj_P.max(0)
-    d1 = Pmin - Rmax
-    d2 = Rmin - Pmax
-    axis_gaps = (1/alpha_pair) * logsumexp(alpha_pair * jnp.stack([d1, d2]), axis=0)
-
-    h = (1/alpha_axes) * logsumexp(alpha_axes * axis_gaps)
-    separation_flag = jnp.where(h > 0, 1, 0)
-    
-    return h, separation_flag
-
 '''V5'''
 @jax.jit
 def compute_distance(robot, poly, alpha=1000.0):
@@ -253,7 +195,7 @@ def compute_distance(robot, poly, alpha=1000.0):
     error_bound = jnp.log(2.0 * axes.shape[0]) / alpha
     
     h = h_olsat-error_bound
-    separation_flag = jnp.where(h > 0, 1, 0)
+    separation_flag = jnp.where(h > -0.0, 1, 0)
     
     return h, separation_flag
 
@@ -368,6 +310,211 @@ def penetration_to_contact_force(
     force = -k_contact * penetration_depth
     return jnp.where(penetration_depth <= 0, force, 0.0)
 
+@jax.jit
+def segment_segment_closest_points(a0, a1, b0, b1):
+    """Compute closest points on two segments a0–a1 and b0–b1."""
+    A = a1 - a0
+    B = b1 - b0
+    T = a0 - b0
+
+    A_dot_A = jnp.dot(A, A)
+    B_dot_B = jnp.dot(B, B)
+    A_dot_B = jnp.dot(A, B)
+    A_dot_T = jnp.dot(A, T)
+    B_dot_T = jnp.dot(B, T)
+
+    denom = A_dot_A * B_dot_B - A_dot_B * A_dot_B
+
+    def compute_st():
+        s = (A_dot_B * B_dot_T - B_dot_B * A_dot_T) / denom
+        t = (A_dot_A * B_dot_T - A_dot_B * A_dot_T) / denom
+        return s, t
+
+    def fallback_st():
+        return 0.0, jnp.clip(B_dot_T / B_dot_B, 0.0, 1.0)
+
+    s, t = jax.lax.cond(denom > 1e-8, compute_st, fallback_st)
+
+    s = jnp.clip(s, 0.0, 1.0)
+    t = jnp.clip(t, 0.0, 1.0)
+
+    p_closest = a0 + s * A
+    q_closest = b0 + t * B
+    dist = jnp.linalg.norm(p_closest - q_closest)
+
+    return p_closest, q_closest, dist
+
+@jax.jit
+def find_closest_segment_point_and_direction(robot: jnp.ndarray, obs: jnp.ndarray, flag: bool = True):
+    poly1 = robot
+    poly2 = obs
+    seg1_start = poly1
+    seg1_end = jnp.roll(poly1, -1, axis=0)
+    seg2_start = poly2
+    seg2_end = jnp.roll(poly2, -1, axis=0)
+
+    def one_edge_pair(a0, a1):
+        def inner(b0, b1):
+            return segment_segment_closest_points(a0, a1, b0, b1)
+        return jax.vmap(inner)(seg2_start, seg2_end)
+
+    # Apply vmap over poly1 edges
+    p_closest, q_closest, dists = jax.vmap(one_edge_pair)(seg1_start, seg1_end)  # each (N1, N2, 2) or (N1, N2)
+
+    dists_flat = dists.reshape(-1)
+    p_flat = p_closest.reshape(-1, 2)  # closest on poly1
+    q_flat = q_closest.reshape(-1, 2)  # closest on poly2
+
+    idx = jnp.argmin(dists_flat)
+    p_poly1 = p_flat[idx]
+    q_poly2 = q_flat[idx]
+
+    # Vector and norm
+    vec = p_poly1 - q_poly2
+    norm = jnp.linalg.norm(vec) + 1e-8
+    dir_vec = vec / norm
+
+    # Conditionally flip the direction
+    dir_vec = lax.cond(flag, lambda x: x, lambda x: -x, dir_vec)
+
+    return p_poly1, dir_vec
+
+def contact_force_fn(d, k_c=1.0, eps=1e-2):
+    return k_c * jnp.log1p(jnp.exp(-d / eps))  # h < 0 → 大力，h > 0 → 接近0
+
+def compute_contact_jacobian_fn(q: jnp.ndarray, p_c: jnp.ndarray, s_c: float) -> jnp.ndarray:
+    """
+    Compute the 2×3N positional Jacobian J_c(q) of the contact point p_c,
+    defined using orientation-aware correction.
+
+    Args:
+        q: (3N,) robot configuration
+        p_c: (2,) contact point in workspace
+        s_c: float, arc-length along the backbone
+
+    Returns:
+        J_c: (2, 3N) positional Jacobian of the contact point
+    """
+    # 1. Full Jacobian at s_c: rows = [J_x, J_y, J_theta]
+    J_full = jacobian_fn(robot_params, q, s_c)  # (3, 3N)
+    J_xy = J_full[0:2, :]     # (2, 3N)
+    J_theta = J_full[2:3, :]  # (1, 3N), ensure it's a row vector
+
+    # 2. Forward kinematics position at arc-length s_c
+    p_fk = forward_kinematics_fn(robot_params, q, s_c)[:2]  # (2,)
+
+    # 3. Compute correction term
+    delta = p_c - p_fk  # (2,)
+    rotated = jnp.diag(jnp.array([-1.0, 1.0])) @ delta  # (2,)
+    correction = rotated[:, None]  # (2,1)
+
+    # 4. Final Jacobian (2,3N)
+    J_c = J_xy + correction @ J_theta
+    return J_c
+
+# def compute_contact_torque(config, q):
+#     tau = jnp.zeros_like(q)
+
+#     # Config values
+#     k = 3000  # contact force model
+#     eps = 1e-4
+#     obs_poly = config.poly_obstacle_pos
+#     robot_params = config.robot_params
+#     s_ps = config.s_ps
+#     robot_radius = 2e-2
+
+#     # FK
+#     p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # (N, 3)
+#     p_ps = p[:, :2]
+#     p_theta = p[:, 2]
+
+#     seg_starts = p_ps[:-1]
+#     seg_ends = p_ps[1:]
+#     last_vec = seg_ends[-1] - seg_starts[-1]
+#     new_end = seg_starts[-1] + 2.0 * last_vec
+#     seg_ends = seg_ends.at[-1].set(new_end)
+#     seg_orient = p_theta[:-1]
+
+#     robot_poly = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
+#         seg_starts, seg_ends, seg_orient, robot_radius
+#     )
+
+#     num_segments = robot_poly.shape[0]
+#     num_obstacles = obs_poly.shape[0]
+
+#     for i in range(num_segments):
+#         for j in range(num_obstacles):
+#             poly_seg = robot_poly[i]
+#             poly_obs = obs_poly[j]
+
+#             # Signed distance
+#             d, flag = compute_distance(poly_seg, poly_obs)
+
+#             # Compute force magnitude (softly decays to 0 when d > 0)
+#             f_mag = k * jnp.log1p(jnp.exp(-d / eps))  # smooth force, always ≥ 0
+
+#             # Closest contact point and normal
+#             p_c, n_hat = find_closest_segment_point_and_direction(poly_seg, poly_obs, flag=flag)
+#             n_hat = n_hat / (jnp.linalg.norm(n_hat) + 1e-6)
+
+#             f_vec = f_mag * n_hat  # (2,)
+#             J_c = compute_contact_jacobian_fn(q, p_c, s_ps[i])  # (2, 3N)
+#             tau_ij = J_c.T @ f_vec  # (3N,)
+
+#             tau += tau_ij
+#     return tau
+
+@jax.jit
+def compute_contact_torque(
+    q: jnp.ndarray,
+    robot_params,
+    s_ps: jnp.ndarray,
+    obs_poly: jnp.ndarray,
+    robot_radius: float,
+    k: float,
+    eps: float = 1e-4,
+) -> jnp.ndarray:
+
+    # FK
+    p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # (N, 3)
+    p_ps = p[:, :2]
+    p_theta = p[:, 2]
+    seg_starts = p_ps[:-1]
+    seg_ends = p_ps[1:]
+    last_vec = seg_ends[-1] - seg_starts[-1]
+    new_end = seg_starts[-1] + 2.0 * last_vec
+    seg_ends = seg_ends.at[-1].set(new_end)
+    seg_orient = p_theta[:-1]
+
+    robot_poly = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
+        seg_starts, seg_ends, seg_orient, robot_radius
+    )
+
+    num_segments = robot_poly.shape[0]
+    num_obstacles = obs_poly.shape[0]
+
+    seg_ids, obs_ids = jnp.meshgrid(jnp.arange(num_segments), jnp.arange(num_obstacles), indexing="ij")
+    pair_indices = jnp.stack([seg_ids.reshape(-1), obs_ids.reshape(-1)], axis=1)
+
+    def interact(pair_idx):
+        i, j = pair_idx
+        poly_seg = robot_poly[i]
+        poly_obs = obs_poly[j]
+        s_i = s_ps[i]
+
+        d, flag = compute_distance(poly_seg, poly_obs)
+        f_mag = k * jax.nn.softplus(-d / eps)
+        p_c, n_hat = find_closest_segment_point_and_direction(poly_seg, poly_obs, flag=flag)
+        n_hat = n_hat / (jnp.linalg.norm(n_hat) + 1e-6)
+        f_vec = f_mag * n_hat
+        J_c = compute_contact_jacobian_fn(q, p_c, s_i)
+        return J_c.T @ f_vec  # (3N,)
+
+    tau_all = jax.vmap(interact)(pair_indices)  # shape: (num_pairs, 3N)
+    tau = tau_all.sum(axis=0)
+    return tau
+
+
 def soft_robot_with_safety_contact_CBFCLF_example():
     
     # define the ODE function
@@ -377,7 +524,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         def __init__(self):
 
             self.robot_params = robot_params
-
+            self.robot_radius = robot_radius
             self.strain_selector = jnp.ones((3 * num_segments,), dtype=bool)
 
             '''Polygon Obstacle Parameter'''
@@ -395,14 +542,14 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             
             # self.poly_obstacle_pos = self.poly_obstacle_shape/4 + jnp.array([-0.08,0.04])
             self.poly_obstacle_pos_1 = self.poly_obstacle_shape_1 + jnp.array([-0.11,0])
-            self.poly_obstacle_pos_2 = self.poly_obstacle_shape_2 + jnp.array([0.025,0])
+            self.poly_obstacle_pos_2 = self.poly_obstacle_shape_2 + jnp.array([0.045,0])
 
             self.poly_obstacle_pos_3 = self.poly_obstacle_pos_1[2,:] + self.poly_obstacle_shape_2
 
             self.poly_obstacle_pos_4 = self.poly_obstacle_pos_2[2,:] + self.poly_obstacle_shape_1
 
             self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_1,self.poly_obstacle_pos_2,self.poly_obstacle_pos_3,self.poly_obstacle_pos_4])
-
+            # self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_2,self.poly_obstacle_pos_3,self.poly_obstacle_pos_4])
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 30 * num_segments) # segmented
 
@@ -417,7 +564,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.p_des_2 = jnp.stack([self.p_des_1_2,self.p_des_2_2])
             self.p_des_3 = jnp.stack([self.p_des_2_2,self.p_des_2_3])
             
-            self.p_des_all = jnp.stack([self.p_des_1, self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
+            self.p_des_all = jnp.stack([self.p_des_1,self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
             self.num_waypoints = self.p_des_all.shape[0]
             
             '''Select the end of each segment'''
@@ -425,28 +572,50 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 3000 #contact force model
-            self.maximum_withhold_force = -0.005*3000
-            
+            self.contact_spring_constant = 300
+            self.maximum_withhold_force = 2
+            # self.maximum_withhold_force = -0.005*3000
+
+            self.contact_torque_fn = partial(
+                    compute_contact_torque,
+                    robot_params=self.robot_params,
+                    s_ps=self.s_ps,
+                    obs_poly=self.poly_obstacle_pos,
+                    robot_radius=self.robot_radius,
+                    k=self.contact_spring_constant,
+                    eps=1e-4,
+                )
             super().__init__(
                 n=6 * num_segments, # number of states
                 m=3 * num_segments, # number of inputs
                 # Note: Relaxing the CLF-CBF QP is tricky because there is an additional relaxation
                 # parameter already, balancing the CLF and CBF constraints.
-                relax_cbf=True,
+                relax_cbf=False,
                 # If indeed relaxing, ensure that the QP relaxation >> the CLF relaxation
                 cbf_relaxation_penalty=1e8,
-                clf_relaxation_penalty=1000
+                clf_relaxation_penalty=10
             )
 
+        # def f(self, z) -> Array:
+        #     q, q_d = jnp.split(z, 2)  # Split state z into q (position) and q_d (velocity)
+        #     B, C, G, K, D, alpha = dynamical_matrices_fn(self.robot_params, q, q_d)
+
+        #     # Drift term (f(x))
+        #     drift = (
+        #         -jnp.linalg.inv(B) @ (C @ q_d + D @ q_d + G + K)
+        #     )
+            
+        #     return jnp.concatenate([q_d, drift])
+        
         def f(self, z) -> Array:
-            q, q_d = jnp.split(z, 2)  # Split state z into q (position) and q_d (velocity)
+            q, q_d = jnp.split(z, 2)
             B, C, G, K, D, alpha = dynamical_matrices_fn(self.robot_params, q, q_d)
 
-            # Drift term (f(x))
-            drift = (
-                -jnp.linalg.inv(B) @ (C @ q_d + D @ q_d + G + K)
-            )
-            
+            # contact torque
+            tau_contact = self.contact_torque_fn(q)  
+
+            drift = -jnp.linalg.inv(B) @ (C @ q_d + D @ q_d + G + K - tau_contact)
+
             return jnp.concatenate([q_d, drift])
 
         def g(self, z) -> Array:
@@ -560,7 +729,8 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         
         # Compute the dynamical matrices.
         B, C, G, K, D, alpha = dynamical_matrices_fn(robot_params, q, q_d)
-        
+        contact_torque = config.contact_torque_fn(q)
+        u += contact_torque
         # Compute the acceleration.
         q_dd = jnp.linalg.inv(B) @ (u - C @ q_d - G - K - D @ q_d)
         
@@ -588,56 +758,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     dt = 2e-3     # integration step (for manual stepping)
     sim_dt = 1e-3 # simulation dt used by the solver
 
-    # def simulation_step(carry, _):
-    #     """
-    #     Performs one simulation step.
-        
-    #     carry: a tuple (t, y_current, current_flag)
-    #     _    : placeholder for scan (unused)
-    #     """
-    #     t, y_current, current_index, track_indices = carry
-    #     # Choose z_des based on current_index
-    #     current_z_des = p_des_all[current_index]
+    # dt = 5e-3     # integration step (for manual stepping)
+    # sim_dt = 2e-3 # simulation dt used by the solver
 
-    #     # Integrate the ODE from t to t + dt
-    #     sol = dx.diffeqsolve(
-    #         dx.ODETerm(closed_loop_ode_fn),
-    #         dx.Tsit5(),
-    #         t0=t,
-    #         t1=t + dt,
-    #         dt0=sim_dt,
-    #         y0=y_current,
-    #         args=current_z_des,
-    #     )
-
-    #     current_z_des, _ = jnp.split(current_z_des, 2) # get the desired position
-    #     current_z_des = jnp.stack(jnp.split(current_z_des,num_segments)) # in the shape of (num_segments, 3)
-
-    #     y_next = sol.ys[-1]
-    #     q, q_d = jnp.split(y_next, 2)
-    #     p = batched_forward_kinematics_fn(config.robot_params, q, config.s_ps)
-       
-    #     end_p_ps = p[track_indices, :2] # the end of every segement
-        
-    #             # Update flag based on tracking error
-    #     tracking_error = jnp.sum(jnp.stack([
-    #         jnp.linalg.norm(end_p_ps[i, :2] - current_z_des[i, :2])
-    #         for i in range(num_segments)
-    #     ]))
-
-    #     new_index = jnp.where(tracking_error < 0.05,
-    #                         jnp.minimum(current_index + 1, p_des_all.shape[0]-1),
-    #                         current_index)
-        
-    #     # Update time
-    #     t_next = t + dt
-
-    #     # New carry for next iteration
-    #     new_carry = (t_next, y_next, new_index, track_indices)
-    #     # Output for storage (time and state)
-    #     output = (t_next, y_next)
-    #     return new_carry, output
-    
     def simulation_step(carry, _):
         t, y_current, current_index, track_indices = carry
         current_z_des = p_des_all[current_index]
@@ -698,7 +821,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     # Run the simulation
     # ts, ys = run_simulation()
     ts, ys, us = run_simulation()
-
     # Optionally, split ys if needed (e.g., into q_ts and q_d_ts)
     q_ts, q_d_ts = jnp.split(ys, 2, axis=1)
 
