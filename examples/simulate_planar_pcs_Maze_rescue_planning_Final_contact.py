@@ -173,6 +173,37 @@ def compute_gap_along_centers(vertices1, vertices2, eps=1e-3):
     return gap
 
 '''V5'''
+
+def connect_project(cA, cB, polyB):
+    """
+    1) Compute centroids of polyA and polyB.
+    2) Draw the ray from centroid A to centroid B.
+    3) Find the first intersection of that ray with polyB's boundary.
+      hit_point  -- point on B where the cA→cB ray first intersects
+    """
+
+    v = cB - cA  # direction vector from A to B
+
+    # -- Ray-segment intersection loop --
+    best_t = jnp.inf
+    hit = None
+    for i in range(len(polyB)):
+        A_edge = polyB[i]
+        B_edge = polyB[(i+1) % len(polyB)]
+        d = B_edge - A_edge
+
+        M = jnp.column_stack((v, -d))
+        if jnp.linalg.matrix_rank(M) < 2:
+            continue
+
+        t, u = jnp.linalg.solve(M, A_edge - cA)
+        # t >=0 → along ray direction; 0<=u<=1 → within the segment
+        if (t >= 0) and (0 <= u <= 1) and (t < best_t):
+            best_t = t
+            hit = cA + t*v
+
+    return hit
+
 @jax.jit
 def compute_distance(robot, poly, alpha=1000.0):
     def get_normals(v):
@@ -261,54 +292,6 @@ def half_circle_to_polygon(center, forward_direction, radius, num_arc_points=30)
     # the shape is a convex polygon approximating the half circle with a straight chord closing the shape.
     return arc_points
 
-def connect_project(cA, cB, polyB):
-    """
-    1) Compute centroids of polyA and polyB.
-    2) Draw the ray from centroid A to centroid B.
-    3) Find the first intersection of that ray with polyB's boundary.
-      hit_point  -- point on B where the cA→cB ray first intersects
-    """
-
-    v = cB - cA  # direction vector from A to B
-
-    # -- Ray-segment intersection loop --
-    best_t = jnp.inf
-    hit = None
-    for i in range(len(polyB)):
-        A_edge = polyB[i]
-        B_edge = polyB[(i+1) % len(polyB)]
-        d = B_edge - A_edge
-
-        M = jnp.column_stack((v, -d))
-        if jnp.linalg.matrix_rank(M) < 2:
-            continue
-
-        t, u = jnp.linalg.solve(M, A_edge - cA)
-        # t >=0 → along ray direction; 0<=u<=1 → within the segment
-        if (t >= 0) and (0 <= u <= 1) and (t < best_t):
-            best_t = t
-            hit = cA + t*v
-
-    return hit
-
-def penetration_to_contact_force(
-    penetration_depth: jnp.ndarray,
-    k_contact: float
-) -> jnp.ndarray:
-    """
-    Piecewise-smooth contact force model:
-        F(d) = -k * d     if d <= 0
-             = 0         if d > 0
-
-    Args:
-        penetration_depth: jnp.ndarray, signed distances (positive = separated)
-        k_contact: contact spring constant
-
-    Returns:
-        jnp.ndarray of contact forces (>= 0 when in contact)
-    """
-    force = -k_contact * penetration_depth
-    return jnp.where(penetration_depth <= 0, force, 0.0)
 
 @jax.jit
 def segment_segment_closest_points(a0, a1, b0, b1):
@@ -377,10 +360,8 @@ def find_closest_segment_point_and_direction(robot: jnp.ndarray, obs: jnp.ndarra
     # Conditionally flip the direction
     dir_vec = lax.cond(flag, lambda x: x, lambda x: -x, dir_vec)
 
-    return p_poly1, dir_vec
+    return p_poly1,q_poly2, dir_vec
 
-def contact_force_fn(d, k_c=1.0, eps=1e-2):
-    return k_c * jnp.log1p(jnp.exp(-d / eps))  # h < 0 → 大力，h > 0 → 接近0
 
 def compute_contact_jacobian_fn(q: jnp.ndarray, p_c: jnp.ndarray, s_c: float) -> jnp.ndarray:
     """
@@ -411,58 +392,6 @@ def compute_contact_jacobian_fn(q: jnp.ndarray, p_c: jnp.ndarray, s_c: float) ->
     # 4. Final Jacobian (2,3N)
     J_c = J_xy + correction @ J_theta
     return J_c
-
-# def compute_contact_torque(config, q):
-#     tau = jnp.zeros_like(q)
-
-#     # Config values
-#     k = 3000  # contact force model
-#     eps = 1e-4
-#     obs_poly = config.poly_obstacle_pos
-#     robot_params = config.robot_params
-#     s_ps = config.s_ps
-#     robot_radius = 2e-2
-
-#     # FK
-#     p = batched_forward_kinematics_fn(robot_params, q, s_ps)  # (N, 3)
-#     p_ps = p[:, :2]
-#     p_theta = p[:, 2]
-
-#     seg_starts = p_ps[:-1]
-#     seg_ends = p_ps[1:]
-#     last_vec = seg_ends[-1] - seg_starts[-1]
-#     new_end = seg_starts[-1] + 2.0 * last_vec
-#     seg_ends = seg_ends.at[-1].set(new_end)
-#     seg_orient = p_theta[:-1]
-
-#     robot_poly = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
-#         seg_starts, seg_ends, seg_orient, robot_radius
-#     )
-
-#     num_segments = robot_poly.shape[0]
-#     num_obstacles = obs_poly.shape[0]
-
-#     for i in range(num_segments):
-#         for j in range(num_obstacles):
-#             poly_seg = robot_poly[i]
-#             poly_obs = obs_poly[j]
-
-#             # Signed distance
-#             d, flag = compute_distance(poly_seg, poly_obs)
-
-#             # Compute force magnitude (softly decays to 0 when d > 0)
-#             f_mag = k * jnp.log1p(jnp.exp(-d / eps))  # smooth force, always ≥ 0
-
-#             # Closest contact point and normal
-#             p_c, n_hat = find_closest_segment_point_and_direction(poly_seg, poly_obs, flag=flag)
-#             n_hat = n_hat / (jnp.linalg.norm(n_hat) + 1e-6)
-
-#             f_vec = f_mag * n_hat  # (2,)
-#             J_c = compute_contact_jacobian_fn(q, p_c, s_ps[i])  # (2, 3N)
-#             tau_ij = J_c.T @ f_vec  # (3N,)
-
-#             tau += tau_ij
-#     return tau
 
 @jax.jit
 def compute_contact_torque(
@@ -502,18 +431,29 @@ def compute_contact_torque(
         poly_obs = obs_poly[j]
         s_i = s_ps[i]
 
-        d, flag = compute_distance(poly_seg, poly_obs)
-        f_mag = k * jax.nn.softplus(-d / eps)
-        p_c, n_hat = find_closest_segment_point_and_direction(poly_seg, poly_obs, flag=flag)
-        n_hat = n_hat / (jnp.linalg.norm(n_hat) + 1e-6)
-        f_vec = f_mag * n_hat
+        # d, flag = compute_distance(poly_seg, poly_obs)
+        # f_mag = k * jax.nn.softplus(-d / eps)
+        # p_c, n_hat = find_closest_segment_point_and_direction(poly_seg, poly_obs, flag=flag)
+        # n_hat = n_hat / (jnp.linalg.norm(n_hat) + 1e-6)
+        # f_vec = f_mag * n_hat
+
+        d, _ = compute_distance(poly_seg, poly_obs) 
+        p_c, q_c, _ = find_closest_segment_point_and_direction(poly_seg, poly_obs)  # ← 我们改一下这个函数接口
+
+        # Step 2: compute direction from obs → robot
+        vec = p_c - q_c
+        dir_vec = vec / (jnp.linalg.norm(vec) + 1e-8)
+
+        # Step 3: compute repulsive force (only significant if d < 0)
+        # f_mag = k * jax.nn.softplus(-d / eps)
+        f_mag = (k * jax.nn.elu(-d / eps) + k) * eps
+        f_vec = f_mag * dir_vec  
         J_c = compute_contact_jacobian_fn(q, p_c, s_i)
         return J_c.T @ f_vec  # (3N,)
 
     tau_all = jax.vmap(interact)(pair_indices)  # shape: (num_pairs, 3N)
     tau = tau_all.sum(axis=0)
     return tau
-
 
 def soft_robot_with_safety_contact_CBFCLF_example():
     
@@ -551,13 +491,13 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_1,self.poly_obstacle_pos_2,self.poly_obstacle_pos_3,self.poly_obstacle_pos_4])
             # self.poly_obstacle_pos = jnp.stack([self.poly_obstacle_pos_2,self.poly_obstacle_pos_3,self.poly_obstacle_pos_4])
             '''Characteristic of robot'''
-            self.s_ps = jnp.linspace(0, robot_length * num_segments, 30 * num_segments) # segmented
+            self.s_ps = jnp.linspace(0, robot_length * num_segments, num_points) # segmented
 
-            self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.7, -jnp.pi*1.8*robot_length])
+            self.p_des_1_1 = jnp.array([0.00, 0.15234353*0.65, -jnp.pi*1.8*robot_length])
             self.p_des_1_2 = jnp.array([0.06, 0.18234353, 0])
 
             self.p_des_2_1 = jnp.array([0.05951909*1.5, 0.15234353*0.85, -jnp.pi*1.8*robot_length])
-            self.p_des_2_2 = jnp.array([0.12, 0.21234353, 0])
+            self.p_des_2_2 = jnp.array([0.13, 0.20234353, 0])
             self.p_des_2_3= jnp.array([0.21, 0.38234353, 0])
 
             self.p_des_1 = jnp.stack([self.p_des_1_1,self.p_des_2_2])
@@ -565,17 +505,14 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             self.p_des_3 = jnp.stack([self.p_des_2_2,self.p_des_2_3])
             
             self.p_des_all = jnp.stack([self.p_des_1,self.p_des_3]) # shape (num_waypoints, num_of_segments, 3)
-            self.num_waypoints = self.p_des_all.shape[0]
             
             '''Select the end of each segment'''
             self.indices = end_p_ps_indices
 
             '''Contact model Parameter'''
-            self.contact_spring_constant = 3000 #contact force model
-            self.contact_spring_constant = 300
-            self.maximum_withhold_force = 2
-            # self.maximum_withhold_force = -0.005*3000
-
+            self.contact_spring_constant = 3000
+            self.maximum_withhold_force = 10
+            
             self.contact_torque_fn = partial(
                     compute_contact_torque,
                     robot_params=self.robot_params,
@@ -583,8 +520,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                     obs_poly=self.poly_obstacle_pos,
                     robot_radius=self.robot_radius,
                     k=self.contact_spring_constant,
-                    eps=1e-4,
+                    eps=2e-4,
                 )
+            
             super().__init__(
                 n=6 * num_segments, # number of states
                 m=3 * num_segments, # number of inputs
@@ -880,8 +818,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     # plt.tight_layout()
     # plt.show()
 
-    i_focus = 18 
-
     def get_contact_matrix(full_distance_array, threshold=0.0002):
         """Return a boolean contact matrix where distance < threshold."""
         return full_distance_array < threshold
@@ -891,8 +827,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     times = onp.array(ts[::20])
     full_distance_list = []
     chi_ps_list = []
-    distance_list = []
-    flag_list = []
+    segs_list =[]
 
     # ————————————————————————————————————————
     # 2. Forward kinematics, segmentation, and distance computation
@@ -908,17 +843,15 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         segs = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
             cur_pts, nxt_pts, ors, robot_radius
         )
+        segs_list.append(onp.array(segs))
 
         def distance_to_all_obstacles(seg_poly):
-            dists, flags = jax.vmap(lambda obs_poly: compute_distance(seg_poly, obs_poly))(
+            dists, _ = jax.vmap(lambda obs_poly: compute_distance(seg_poly, obs_poly))(
                 config.poly_obstacle_pos
             )
             return dists
 
         d_segs = jax.vmap(distance_to_all_obstacles)(segs)
-
-        d_focus = float(d_segs[0, 0])
-        distance_list.append(d_focus)
 
         # Then still add to full_distance_list
         full_distance_list.append(d_segs)
@@ -929,12 +862,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # ————————————————————————————————————————
     # 4. Detect collisions (contacts)
-    threshold = 10/3000
-    red_contacts_by_time = get_contact_matrix(full_distance_array, threshold=config.maximum_withhold_force/config.contact_spring_constant)
-    blue_contacts_by_time = get_contact_matrix(full_distance_array, threshold=config.maximum_withhold_force/config.contact_spring_constant*2)
+    # threshold = 10/3000
+    # red_contacts_by_time = get_contact_matrix(full_distance_array, threshold=config.maximum_withhold_force/config.contact_spring_constant)
+    # blue_contacts_by_time = get_contact_matrix(full_distance_array, threshold=config.maximum_withhold_force/config.contact_spring_constant*2)
 
-    red_contacts_by_time = get_contact_matrix(full_distance_array, threshold=threshold)
-    blue_contacts_by_time = get_contact_matrix(full_distance_array, threshold=threshold*2)
+    red_contacts_by_time = get_contact_matrix(full_distance_array, threshold=-0.005) # shape (T, N_seg, N_obs)
+    blue_contacts_by_time = get_contact_matrix(full_distance_array, threshold=0)  # shape (T, N_seg, N_obs)
     # ————————————————————————————————————————
     # 5. Extract valid contact points
     T, N_seg, N_obs = red_contacts_by_time.shape
@@ -945,10 +878,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         for seg_id in range(N_seg):
             for obs_id in range(N_obs):
                 if red_contacts_by_time[t, seg_id, obs_id]:
-                    seg_poly_center = chi_ps_list[t][seg_id]
+                    # seg_poly_center = chi_ps_list[t][seg_id] 
+                    seg_poly = segs_list[t][seg_id]
                     obs_poly = config.poly_obstacle_pos[obs_id]
 
-                    contact_pt = connect_project(seg_poly_center, jnp.mean(obs_poly, axis=0), obs_poly)
+                    # contact_pt = connect_project(seg_poly_center, jnp.mean(obs_poly, axis=0), obs_poly)
+                    _, contact_pt, _ = find_closest_segment_point_and_direction(seg_poly, obs_poly, flag=True)
 
                     if not jnp.isnan(contact_pt).any():
                         red_contact_points_list.append((
@@ -961,10 +896,11 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         for seg_id in range(N_seg):
             for obs_id in range(N_obs):
                 if blue_contacts_by_time[t, seg_id, obs_id]:
-                    seg_poly_center = chi_ps_list[t][seg_id]
+                    # seg_poly_center = chi_ps_list[t][seg_id]
+                    seg_poly = segs_list[t][seg_id]
                     obs_poly = config.poly_obstacle_pos[obs_id]
 
-                    contact_pt = connect_project(seg_poly_center, jnp.mean(obs_poly, axis=0), obs_poly)
+                    _, contact_pt, _ = find_closest_segment_point_and_direction(seg_poly, obs_poly, flag=True)
 
                     if not jnp.isnan(contact_pt).any():
                         blue_contact_points_list.append((
@@ -1004,6 +940,11 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 print(f"⚠️ obs_idx={obs_idx} out of range [0, {num_obs})")
         return result
 
+    pos = jnp.stack([
+        p[:, :2]  # reshapes p to (n, 3) and takes the first two columns from each row
+        for p in config.p_des_all
+        ]) # shape (num_waypoints,num_semgnets,2)
+    
     current_index = 0
     for t_idx, q in enumerate(q_ts[::20]):
         blue_frame_contact_points = extract_multiple_contact_points_by_obs(blue_contact_points_array, t_idx, len(config.poly_obstacle_pos[0]))
@@ -1037,7 +978,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             p_des_all = None,
             index = current_index,
             blue_contact_points= blue_frame_contact_points,
-            red_contact_points= None,
+            red_contact_points= red_frame_contact_points,
             enable_contact=True,
         )
         img_ts.append(img)
