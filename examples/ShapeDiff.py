@@ -163,13 +163,9 @@ def soft_robot_segmentation_result_example():
     for q in q_batch:
         # Reference high-resolution shape
         robot_poly_ref = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=1000)
-        points_ref = []
-        for poly_array in robot_poly_ref:
-            poly = Polygon(onp.array(poly_array))
-            pt = sample_one_point_in_polygon(poly)
-            points_ref.append([pt.x, pt.y])
-
-        points_ref = onp.array(points_ref)  # shape (num_segments, 2)
+        points_ref = onp.array(
+            unary_union([Polygon(onp.array(poly)) for poly in robot_poly_ref]).exterior.coords
+        )
 
         
         for i, num in enumerate(num_polygons):
@@ -184,7 +180,7 @@ def soft_robot_segmentation_result_example():
 
             # Monte Carlo containment ratio
             poly_union = polygon_list_to_union([onp.array(poly) for poly in robot_poly])
-            count_inside = sum(poly_union.contains(pt) for pt in points_ref)
+            count_inside = sum(poly_union.contains(Point(pt)) for pt in points_ref)
             containment_ratio = count_inside / len(points_ref)
 
             containment_records[i].append(containment_ratio)
