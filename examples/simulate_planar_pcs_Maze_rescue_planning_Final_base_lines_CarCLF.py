@@ -66,7 +66,7 @@ batched_forward_kinematics_fn = vmap(
 )
 
 # segmenting params
-num_points = 30*num_segments
+num_points = 20*num_segments
 # Compute indices: equivalent to
 # [num_points * (i+1)//num_segments - 1 for i in range(num_segments)]
 end_p_ps_indices = (jnp.arange(1, num_segments+1) * num_points // num_segments) - 1
@@ -636,52 +636,78 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # Optionally, split ys if needed (e.g., into q_ts and q_d_ts)
     q_ts, q_d_ts = jnp.split(ys, 2, axis=1)
-    # ---------------------------------------------------
-    # Plot h(x) and V(x) over time & print final values
-    # ---------------------------------------------------
-    h_list = []
-    V_list = []
+    # ————————————————————————————————————————
 
+    # Downsample for plotting and saving
     sampled_ts = ts[::20]
-    sampled_ys = ys[::20]
+    sampled_q_ts = q_ts[::20]
 
-    for z in sampled_ys:
-        h_tail = config.h_2(z)[-1]
-        h_tail = jnp.min(config.h_2(z))+30
-        z_des = p_des_all[-1]  
-        V_val = config.V_2(z, z_des).sum()
-        h_list.append(float(h_tail))
-        V_list.append(float(V_val))
+    tracking_error_list = []
+    contact_force_list = []
 
-    # Convert to numpy
+    for q in sampled_q_ts:
+        p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
+        p_ps = p[:, :2]
+
+        cur_pts = p_ps[:-1]
+        nxt_pts = p_ps[1:]
+        ors = jnp.arctan2((nxt_pts - cur_pts)[:, 1], (nxt_pts - cur_pts)[:, 0])
+
+        segs = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
+            cur_pts, nxt_pts, ors, robot_radius
+        )
+
+        def distance_to_all_obstacles(seg_poly):
+            dists, _ = jax.vmap(lambda obs_poly: compute_distance(seg_poly, obs_poly))(
+                config.poly_obstacle_pos
+            )
+            return dists
+
+        d_segs = jax.vmap(distance_to_all_obstacles)(segs)
+        d_segs = d_segs.reshape(-1)  # Flatten to (num_segments * num_obstacles,)
+
+        d_segs = jnp.where(d_segs > 0, 0.0, d_segs)
+        h_tail = - jnp.min(d_segs) * config.contact_spring_constant
+
+        tracking_error = jnp.linalg.norm(p_ps[-1, :2] - config.p_des_all[-1, -1, :2])
+        tracking_error_list.append(float(tracking_error))
+        contact_force_list.append(float(h_tail))
+
     times_np = onp.array(sampled_ts)
-    h_np = onp.array(h_list)
-    V_np = onp.array(V_list)
+    tracking_error_np = onp.array(tracking_error_list)
+    contact_force_np = onp.array(contact_force_list)
 
-    # 先组合数据为 (N, 5) 的矩阵
-    data = onp.stack([times_np, h_np, V_np], axis=1)
+    data = onp.concatenate([
+        times_np[:, None],     # (N, 1)
+        tracking_error_np[:, None],         # (N, 1)
+        contact_force_np[:, None],         # (N, 1)
+    ], axis=1)
 
-    # 保存为 CSV，带列名
-    header = "time,h,V,h_norm,V_norm"
-    alpha = config.maximum_withhold_force
-    filename = f"metrics_alpha_{alpha}.csv"
 
+     # Create header
+    header = "time,tracking_error,contact_force"
+
+    # Save to CSV
+    alpha = 0.005
+    filename = f"potential_{alpha}.csv"
     onp.savetxt(filename, data, delimiter=",", header=header, comments='', fmt="%.6f")
-    # Normalize both to [0, 1]
-    eps = 1e-8  # prevent division by zero
 
-    # Plot
-    plt.figure(figsize=(6, 3))
-    plt.plot(times_np, h_np, label="Normalized CBF: Tip Safety", linewidth=2)
-    plt.plot(times_np, V_np, label="Normalized CLF: Tracking", linewidth=2)
-    plt.xlabel("Time [s]")
-    plt.ylabel("Normalized Value of CLF/CBF")
+    # Plotting the contact force and tracking error
+    plt.figure(figsize=(12, 6))
+    plt.subplot(2, 1, 1)
+    plt.plot(times_np, contact_force_np, label="Contact Force", color="r")
+    plt.ylabel("Force [N]")
     plt.legend()
-    plt.grid(True)
+    plt.grid()
+
+    plt.subplot(2, 1, 2)
+    plt.plot(times_np, tracking_error_np, label="Tracking Error", color="b")
+    plt.ylabel("Error [m]")
+    plt.xlabel("Time [s]")
+    plt.legend()
+    plt.grid()
     plt.tight_layout()
     plt.show()
-
-    i_focus = 18 
 
     def get_contact_matrix(full_distance_array, threshold=0.0002):
         """Return a boolean contact matrix where distance < threshold."""
@@ -692,8 +718,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     times = onp.array(ts[::20])
     full_distance_list = []
     chi_ps_list = []
-    distance_list = []
-    flag_list = []
+    segs_list =[]
 
     # ————————————————————————————————————————
     # 2. Forward kinematics, segmentation, and distance computation
@@ -709,17 +734,15 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         segs = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
             cur_pts, nxt_pts, ors, robot_radius
         )
+        segs_list.append(onp.array(segs))
 
         def distance_to_all_obstacles(seg_poly):
-            dists, flags = jax.vmap(lambda obs_poly: compute_distance(seg_poly, obs_poly))(
+            dists, _ = jax.vmap(lambda obs_poly: compute_distance(seg_poly, obs_poly))(
                 config.poly_obstacle_pos
             )
             return dists
 
         d_segs = jax.vmap(distance_to_all_obstacles)(segs)
-
-        d_focus = float(d_segs[0, 0])
-        distance_list.append(d_focus)
 
         # Then still add to full_distance_list
         full_distance_list.append(d_segs)
@@ -730,12 +753,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # ————————————————————————————————————————
     # 4. Detect collisions (contacts)
-    threshold = 10/3000
-    red_contacts_by_time = get_contact_matrix(full_distance_array, threshold=config.maximum_withhold_force/config.contact_spring_constant)
-    blue_contacts_by_time = get_contact_matrix(full_distance_array, threshold=config.maximum_withhold_force/config.contact_spring_constant*2)
+    # threshold = 10/3000
+    # red_contacts_by_time = get_contact_matrix(full_distance_array, threshold=config.maximum_withhold_force/config.contact_spring_constant)
+    # blue_contacts_by_time = get_contact_matrix(full_distance_array, threshold=config.maximum_withhold_force/config.contact_spring_constant*2)
 
-    red_contacts_by_time = get_contact_matrix(full_distance_array, threshold=threshold)
-    blue_contacts_by_time = get_contact_matrix(full_distance_array, threshold=threshold*2)
+    red_contacts_by_time = get_contact_matrix(full_distance_array, threshold=-0.005) # shape (T, N_seg, N_obs)
+    blue_contacts_by_time = get_contact_matrix(full_distance_array, threshold=0)  # shape (T, N_seg, N_obs)
     # ————————————————————————————————————————
     # 5. Extract valid contact points
     T, N_seg, N_obs = red_contacts_by_time.shape
@@ -746,10 +769,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         for seg_id in range(N_seg):
             for obs_id in range(N_obs):
                 if red_contacts_by_time[t, seg_id, obs_id]:
-                    seg_poly_center = chi_ps_list[t][seg_id]
+                    # seg_poly_center = chi_ps_list[t][seg_id] 
+                    seg_poly = segs_list[t][seg_id]
                     obs_poly = config.poly_obstacle_pos[obs_id]
 
-                    contact_pt = connect_project(seg_poly_center, jnp.mean(obs_poly, axis=0), obs_poly)
+                    # contact_pt = connect_project(seg_poly_center, jnp.mean(obs_poly, axis=0), obs_poly)
+                    _, contact_pt, _ = find_closest_segment_point_and_direction(seg_poly, obs_poly, flag=True)
 
                     if not jnp.isnan(contact_pt).any():
                         red_contact_points_list.append((
@@ -762,10 +787,11 @@ def soft_robot_with_safety_contact_CBFCLF_example():
         for seg_id in range(N_seg):
             for obs_id in range(N_obs):
                 if blue_contacts_by_time[t, seg_id, obs_id]:
-                    seg_poly_center = chi_ps_list[t][seg_id]
+                    # seg_poly_center = chi_ps_list[t][seg_id]
+                    seg_poly = segs_list[t][seg_id]
                     obs_poly = config.poly_obstacle_pos[obs_id]
 
-                    contact_pt = connect_project(seg_poly_center, jnp.mean(obs_poly, axis=0), obs_poly)
+                    _, contact_pt, _ = find_closest_segment_point_and_direction(seg_poly, obs_poly, flag=True)
 
                     if not jnp.isnan(contact_pt).any():
                         blue_contact_points_list.append((
@@ -805,6 +831,11 @@ def soft_robot_with_safety_contact_CBFCLF_example():
                 print(f"⚠️ obs_idx={obs_idx} out of range [0, {num_obs})")
         return result
 
+    pos = jnp.stack([
+        p[:, :2]  # reshapes p to (n, 3) and takes the first two columns from each row
+        for p in config.p_des_all
+        ]) # shape (num_waypoints,num_semgnets,2)
+    
     current_index = 0
     for t_idx, q in enumerate(q_ts[::20]):
         blue_frame_contact_points = extract_multiple_contact_points_by_obs(blue_contact_points_array, t_idx, len(config.poly_obstacle_pos[0]))
@@ -835,7 +866,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             num_segments,
             q,
             poly_points=config.poly_obstacle_pos,
-            p_des_all = None,
+            p_des_all = config.p_des_all[1, 1, :2],
             index = current_index,
             blue_contact_points= blue_frame_contact_points,
             red_contact_points= red_frame_contact_points,

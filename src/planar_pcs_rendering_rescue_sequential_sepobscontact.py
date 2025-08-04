@@ -323,7 +323,7 @@ def draw_image(
                         draw_blue_gradient_rectangle_contour_cv2(
                             img,
                             rect,
-                            fade_distance=100,
+                            fade_distance=150,
                             fade_value=0.9,
                             marker_fraction=marker_fraction,
                             num_points=4000,
@@ -358,7 +358,7 @@ def draw_image(
                         draw_red_gradient_rectangle_contour_cv2(
                             img,
                             rect,
-                            fade_distance=100,
+                            fade_distance=150,
                             fade_value=0.9,
                             marker_fraction=marker_fraction,
                             num_points=4000,
@@ -366,21 +366,34 @@ def draw_image(
                             thickness=-1
                         )
 
-                
+    
+    def draw_cross(img, xy, color=(0, 255, 0), size=10, thickness=2):
+        x, y = int(xy[0]), int(xy[1])
+        cv2.line(img, (x - size, y), (x + size, y), color, thickness)
+        cv2.line(img, (x, y - size), (x, y + size), color, thickness)
+        return img
+
+    # if p_des_all is not None:
+
+    #     pd_plot = p_des_all[index]
+    #     pd_plot = pd_plot.reshape((num_segments), 2)  # First row: mid, Second row: tip
+
+    #     # Draw the two crosses (with a simple red-blue gradient)
+    #     for i, pd in enumerate(pd_plot):
+    #         alpha = i / 1  # 0 for first cross, 1 for second cross
+    #         color = (0, int(255 * alpha), int(255 * (1 - alpha)))  # 0: red, 1: blue (BGR)
+    #         uv_des = onp.array(curve_origin + pd * ppm, dtype=onp.int32)
+    #         uv_des[1] = h - uv_des[1]
+    #         cross_size = 10
+    #         cv2.line(img, (uv_des[0] - cross_size, uv_des[1]),
+    #                     (uv_des[0] + cross_size, uv_des[1]), color, 2)
+    #         cv2.line(img, (uv_des[0], uv_des[1] - cross_size),
+    #                     (uv_des[0], uv_des[1] + cross_size), color, 2)
+    # return img
+
     if p_des_all is not None:
-
-        pd_plot = p_des_all[index]
-        pd_plot = pd_plot.reshape((num_segments), 2)  # First row: mid, Second row: tip
-
-        # Draw the two crosses (with a simple red-blue gradient)
-        for i, pd in enumerate(pd_plot):
-            alpha = i / 1  # 0 for first cross, 1 for second cross
-            color = (0, int(255 * alpha), int(255 * (1 - alpha)))  # 0: red, 1: blue (BGR)
-            uv_des = onp.array(curve_origin + pd * ppm, dtype=onp.int32)
-            uv_des[1] = h - uv_des[1]
-            cross_size = 10
-            cv2.line(img, (uv_des[0] - cross_size, uv_des[1]),
-                        (uv_des[0] + cross_size, uv_des[1]), color, 2)
-            cv2.line(img, (uv_des[0], uv_des[1] - cross_size),
-                        (uv_des[0], uv_des[1] + cross_size), color, 2)
+        pd = p_des_all.reshape(2)
+        uv_des = onp.array(curve_origin + pd * ppm, dtype=onp.int32)
+        uv_des[1] = h - uv_des[1]
+        img = draw_cross(img, uv_des)
     return img

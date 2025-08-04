@@ -479,7 +479,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             
             # self.poly_obstacle_pos = self.poly_obstacle_shape/4 + jnp.array([-0.08,0.04])
-            self.poly_obstacle_pos_1 = self.poly_obstacle_shape_1 + jnp.array([-0.12,0])
+            self.poly_obstacle_pos_1 = self.poly_obstacle_shape_1 + jnp.array([-0.102,0])
             self.poly_obstacle_pos_2 = self.poly_obstacle_shape_2 + jnp.array([0.030,0])
 
             self.poly_obstacle_pos_3 = self.poly_obstacle_pos_1[2,:] + self.poly_obstacle_shape_2
@@ -690,9 +690,9 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             dir_vec = vec / (jnp.linalg.norm(vec) + 1e-8)
 
             # Step 2: compute repulsive force (smoothly activated)
-            eps = 1e-4
+            eps = 2e-3
             safe_d = jnp.maximum(d, eps)
-            alpha = 2.0
+            alpha = 0.5
             beta = 20.0
 
             pen_term = (1.0 / safe_d - 1.0 / rho_0)
@@ -798,7 +798,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
     # Time settings.
     t0 = 0.0
-    tf = 8.0
+    tf = 16.0
     dt = 2e-3     # integration step (for manual stepping)
     sim_dt = 1e-3 # simulation dt used by the solver
 
@@ -880,40 +880,74 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     q_ts, q_d_ts = jnp.split(ys, 2, axis=1)
     # ————————————————————————————————————————
 
-    x_des = config.p_des_all[:, :, :2]  # shape (num_waypoints, num_segments, 2)
-    
-    x_list = []
-    x_des_list = []
+    # Downsample for plotting and saving
+    sampled_ts = ts[::20]
+    sampled_q_ts = q_ts[::20]
 
-    for i in range(len(ts)):
-        q = q_ts[i]
-        z_des = x_des[-1].reshape(num_segments, 2)  # shape (4,)
+    tracking_error_list = []
+    contact_force_list = []
 
+    for q in sampled_q_ts:
         p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
-        x = p[end_p_ps_indices, :2]
-        x = x.reshape(num_segments, 2)  # shape (num_segments, 2)
+        p_ps = p[:, :2]
 
-        x_list.append(x)
-        x_des_list.append(z_des)
-    
-    # Transfer to numpy for plotting
-    x_arr = onp.stack(x_list)
-    x_des_arr = onp.stack(x_des_list)
+        cur_pts = p_ps[:-1]
+        nxt_pts = p_ps[1:]
+        ors = jnp.arctan2((nxt_pts - cur_pts)[:, 1], (nxt_pts - cur_pts)[:, 0])
 
-    # Calculate tracking error (Euclidean norm) over time
-    segment_errors = onp.linalg.norm(x_arr - x_des_arr, axis=2)  # shape: (T, num_segments)
+        segs = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
+            cur_pts, nxt_pts, ors, robot_radius
+        )
 
-    # Plot: one subplot per segment
-    fig, axs = plt.subplots(1, num_segments, figsize=(12, 4), sharey=True)
+        def distance_to_all_obstacles(seg_poly):
+            dists, _ = jax.vmap(lambda obs_poly: compute_distance(seg_poly, obs_poly))(
+                config.poly_obstacle_pos
+            )
+            return dists
 
-    for seg in range(num_segments):
-        axs[seg].plot(ts, segment_errors[:, seg], label=f"Segment {seg+1} L2 Error", linewidth=2)
-        axs[seg].set_title(f"Segment {seg+1} Tracking Error")
-        axs[seg].set_xlabel("Time [s]")
-        axs[seg].grid(True)
-        axs[seg].legend()
+        d_segs = jax.vmap(distance_to_all_obstacles)(segs)
+        d_segs = d_segs.reshape(-1)  # Flatten to (num_segments * num_obstacles,)
 
-    axs[0].set_ylabel("L2 Tracking Error")
+        d_segs = jnp.where(d_segs > 0, 0.0, d_segs)
+        h_tail = - jnp.min(d_segs) * config.contact_spring_constant
+
+        tracking_error = jnp.linalg.norm(p_ps[-1, :2] - config.p_des_all[-1, -1, :2])
+        tracking_error_list.append(float(tracking_error))
+        contact_force_list.append(float(h_tail))
+
+    times_np = onp.array(sampled_ts)
+    tracking_error_np = onp.array(tracking_error_list)
+    contact_force_np = onp.array(contact_force_list)
+
+    data = onp.concatenate([
+        times_np[:, None],     # (N, 1)
+        tracking_error_np[:, None],         # (N, 1)
+        contact_force_np[:, None],         # (N, 1)
+    ], axis=1)
+
+
+     # Create header
+    header = "time,tracking_error,contact_force"
+
+    # Save to CSV
+    alpha = 0.005
+    filename = f"potential_{alpha}.csv"
+    onp.savetxt(filename, data, delimiter=",", header=header, comments='', fmt="%.6f")
+
+    # Plotting the contact force and tracking error
+    plt.figure(figsize=(12, 6))
+    plt.subplot(2, 1, 1)
+    plt.plot(times_np, contact_force_np, label="Contact Force", color="r")
+    plt.ylabel("Force [N]")
+    plt.legend()
+    plt.grid()
+
+    plt.subplot(2, 1, 2)
+    plt.plot(times_np, tracking_error_np, label="Tracking Error", color="b")
+    plt.ylabel("Error [m]")
+    plt.xlabel("Time [s]")
+    plt.legend()
+    plt.grid()
     plt.tight_layout()
     plt.show()
 
@@ -1074,7 +1108,7 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             num_segments,
             q,
             poly_points=config.poly_obstacle_pos,
-            p_des_all = None,
+            p_des_all = config.p_des_all[1, 1, :2],
             index = current_index,
             blue_contact_points= blue_frame_contact_points,
             red_contact_points= red_frame_contact_points,
