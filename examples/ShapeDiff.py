@@ -114,11 +114,18 @@ Example Scripts
 '''
 def soft_robot_segmentation_result_example():
     key = jax.random.PRNGKey(0)
-    q_batch = jax.random.uniform(key, shape=(1000, 6), minval=-0.5, maxval=0.5)
-    num_polygons = jnp.arange(5, 1000, 5)
+
+    rand_vals = jax.random.uniform(key, shape=(100, 6))
+
+    min_vals = jnp.array([-0.5, -0.2, -0.5, -0.5, -0.2, -0.5])
+    max_vals = jnp.array([ 0.5,  0.2,  0.5,  0.5,  0.2,  0.5])
+
+    q_batch = min_vals + rand_vals * (max_vals - min_vals)
+
+    num_polygons = jnp.arange(5, 1000, 50)
 
     haus_sums = jnp.zeros_like(num_polygons, dtype=jnp.float32)
-    num_q_samples = 10
+    num_q_samples = 100
 
     for q in q_batch:
 
@@ -141,6 +148,7 @@ def soft_robot_segmentation_result_example():
     plt.plot(num_polygons, haus_avg, marker='o', label='Avg Hausdorff Distance')
     plt.xlabel("Number of Points per Segment")
     plt.ylabel("Average Symmetric Hausdorff Distance")
+    plt.yscale("log")
     plt.title(f"Mean Shape Error over {num_q_samples} Random Samples")
     plt.grid(True)
     plt.legend()
