@@ -96,103 +96,55 @@ def segment_robot(current, next, orientation):
     seg_poly = segmented_polygon(current, next, orientation, robot_radius)
     return (seg_poly)
 
+
+def get_robot_polygons(q, robot_params, num_segments, resolution_per_segment):
+    s_ps = jnp.linspace(0, robot_length * num_segments, resolution_per_segment * num_segments)
+    p_group = batched_forward_kinematics_fn(robot_params, q, s_ps)
+
+    p_ps = p_group[:, :2]
+    orientations = p_group[:, 2]
+    start_pts, end_pts = p_ps[:-1], p_ps[1:]
+    dirs = orientations[:-1]
+
+    robot_polygons = jax.vmap(segment_robot, in_axes=(0, 0, 0))(start_pts, end_pts, dirs)
+    return robot_polygons
+
 '''
 Example Scripts
 '''
 def soft_robot_segmentation_result_example():
-    
-    def ode_fn(t:float, y: Array, tau: Array) -> Array:
-        q, q_d = jnp.split(y, 2)
-        B, C, G, K, D, alpha = dynamical_matrices_fn(robot_params, q, q_d)
+    key = jax.random.PRNGKey(0)
+    q_batch = jax.random.uniform(key, shape=(1000, 6), minval=-0.5, maxval=0.5)
+    num_polygons = jnp.arange(5, 1000, 5)
 
-        q_dd = jnp.linalg.inv(B) @ (tau - C @ q_d - G - D @ q_d - K)
+    haus_sums = jnp.zeros_like(num_polygons, dtype=jnp.float32)
+    num_q_samples = 10
 
-        y_d = jnp.concatenate([q_d, q_dd])
+    for q in q_batch:
 
-        return y_d
-    
-    q0 = jnp.array ([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    q_d0 = jnp.zeros_like(q0)
-    y0 = jnp.concatenate([q0, q_d0])
+        robot_poly_ref = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=1000)
+        points_ref = onp.concatenate([onp.array(poly) for poly in robot_poly_ref], axis=0)
 
-    tau = jnp.array([-2e-4, 0.0, 1e-2, -2e-4, 0.0, 1e-2])
+        for i, num in enumerate(num_polygons):
+            robot_poly = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=num)
+            points = onp.concatenate([onp.array(poly) for poly in robot_poly], axis=0)
 
-    # time
-    dt = 1e-3
-    sim_dt = 5e-5
+            d01 = directed_hausdorff(points, points_ref)[0]
+            d10 = directed_hausdorff(points_ref, points)[0]
+            haus = max(d01, d10)
 
-    # define the time steps
-    ts = jnp.arange(0, 7.0, dt)
+            haus_sums = haus_sums.at[i].add(haus)
 
-    ode_term = dx.ODETerm(ode_fn)
+    haus_avg = haus_sums / num_q_samples
 
-    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0,tau,
-                        saveat=dx.SaveAt(ts=ts), max_steps = None)
-
-    q_ts, _ = jnp.split(sol.ys, 2, axis=1)
-    # print(q_ts.shape)
-    hausdorff_list_0 = []
-    hausdorff_list_1 = []
-    for q in q_ts[::20]:
-        s_ps_group0 = jnp.linspace(0, robot_length * num_segments, 50 * num_segments)
-        s_ps_group1 = jnp.linspace(0, robot_length * num_segments, 100 * num_segments)
-        s_ps_groupref = jnp.linspace(0, robot_length * num_segments, 1000 * num_segments)
-
-        p_group0 = batched_forward_kinematics_fn(robot_params, q, s_ps_group0) # 20 points per segments
-        p_group1 = batched_forward_kinematics_fn(robot_params, q, s_ps_group1) # 50 points per segmentsq
-        p_groupref = batched_forward_kinematics_fn(robot_params, q, s_ps_groupref) # 1000 points per segments
-
-        p_ps_group0 = p_group0[:, :2]
-        p_orientations_group0 = p_group0[:, 2]
-
-        p_ps_group1 = p_group1[:, :2]
-        p_orientations_group1 = p_group1[:, 2]
-
-        p_ps_groupref = p_groupref[:, :2]
-        p_orientations_groupref = p_groupref[:, 2]
-
-        starting_points_group0 = p_ps_group0[:-1]
-        ending_points_group0 = p_ps_group0[1:]
-        forward_directions_group0 = p_orientations_group0[:-1]
-
-        starting_points_group1 = p_ps_group1[:-1]
-        ending_points_group1 = p_ps_group1[1:]
-        forward_directions_group1 = p_orientations_group1[:-1]
-
-        starting_points_groupref = p_ps_groupref[:-1]
-        ending_points_groupref = p_ps_groupref[1:]
-        forward_directions_groupref = p_orientations_groupref[:-1]
-
-        robot_poly_group0 = vmap(segment_robot, in_axes=(0, 0, 0))(starting_points_group0, ending_points_group0, forward_directions_group0)
-        robot_poly_group1 = vmap(segment_robot, in_axes=(0, 0, 0))(starting_points_group1, ending_points_group1, forward_directions_group1)
-        robot_poly_groupref = vmap(segment_robot, in_axes=(0, 0, 0))(starting_points_groupref, ending_points_groupref, forward_directions_groupref)
-
-        # Convert to numpy for distance calc and plotting
-        points0 = onp.concatenate([onp.array(poly) for poly in robot_poly_group0], axis=0)
-        points1 = onp.concatenate([onp.array(poly) for poly in robot_poly_group1], axis=0)
-        pointsref = onp.concatenate([onp.array(poly) for poly in robot_poly_groupref], axis=0)
-
-        # Compute Hausdorff distance
-        d01_0 = directed_hausdorff(points0, pointsref)[0]
-        d10_0 = directed_hausdorff(pointsref, points0)[0]
-        haus_dist = max(d01_0, d10_0)
-        hausdorff_list_0.append(haus_dist)
-
-        d10_1 = directed_hausdorff(points1, pointsref)[0]
-        d01_1 = directed_hausdorff(pointsref, points1)[0]
-        haus_dist = max(d10_1, d01_1)
-        hausdorff_list_1.append(haus_dist)
-
-    # Plot Hausdorff distance over time
     plt.figure(figsize=(8, 4))
-    plt.plot(range(len(hausdorff_list_1)), hausdorff_list_0, hausdorff_list_1, marker='o')
-    plt.title('Symmetric Hausdorff Distance over Sampled Time Steps')
-    plt.xlabel('Sampled Frame Index')
-    plt.ylabel('Hausdorff Distance (m)')
-    plt.legend(['50 Points per Segment', '100 Points per Segment'])
+    plt.plot(num_polygons, haus_avg, marker='o', label='Avg Hausdorff Distance')
+    plt.xlabel("Number of Points per Segment")
+    plt.ylabel("Average Symmetric Hausdorff Distance")
+    plt.title(f"Mean Shape Error over {num_q_samples} Random Samples")
     plt.grid(True)
+    plt.legend()
     plt.tight_layout()
     plt.show()
-
 if __name__ == "__main__":
     soft_robot_segmentation_result_example()
