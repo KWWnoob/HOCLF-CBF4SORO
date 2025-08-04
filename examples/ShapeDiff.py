@@ -116,19 +116,15 @@ def soft_robot_segmentation_result_example():
     key = jax.random.PRNGKey(0)
 
     rand_vals = jax.random.uniform(key, shape=(100, 6))
-
     min_vals = jnp.array([-0.5, -0.2, -0.5, -0.5, -0.2, -0.5])
     max_vals = jnp.array([ 0.5,  0.2,  0.5,  0.5,  0.2,  0.5])
-
     q_batch = min_vals + rand_vals * (max_vals - min_vals)
 
     num_polygons = jnp.arange(5, 1000, 50)
-
-    haus_sums = jnp.zeros_like(num_polygons, dtype=jnp.float32)
-    num_q_samples = 100
+    num_q_samples = q_batch.shape[0]
+    haus_records = [[] for _ in range(len(num_polygons))] 
 
     for q in q_batch:
-
         robot_poly_ref = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=1000)
         points_ref = onp.concatenate([onp.array(poly) for poly in robot_poly_ref], axis=0)
 
@@ -140,19 +136,32 @@ def soft_robot_segmentation_result_example():
             d10 = directed_hausdorff(points_ref, points)[0]
             haus = max(d01, d10)
 
-            haus_sums = haus_sums.at[i].add(haus)
+            haus_records[i].append(haus)
 
-    haus_avg = haus_sums / num_q_samples
+    haus_array = onp.array([onp.array(vals) for vals in haus_records])
+    haus_avg = haus_array.mean(axis=1)
+    haus_std = haus_array.std(axis=1)
 
+    # ---- Plot with error bars ----
     plt.figure(figsize=(8, 4))
-    plt.plot(num_polygons, haus_avg, marker='o', label='Avg Hausdorff Distance')
+    plt.errorbar(
+        num_polygons,
+        haus_avg,
+        yerr=haus_std,
+        fmt='o-', capsize=3,
+        color='blue',
+        ecolor='gray',
+        elinewidth=1.5,
+        label='Average ± Std'
+    )
     plt.xlabel("Number of Points per Segment")
-    plt.ylabel("Average Symmetric Hausdorff Distance")
+    plt.ylabel("Symmetric Hausdorff Distance (log scale)")
     plt.yscale("log")
-    plt.title(f"Mean Shape Error over {num_q_samples} Random Samples")
-    plt.grid(True)
+    plt.title(f"Average Shape Error with Std Dev ({num_q_samples} Samples)")
+    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
     plt.legend()
     plt.tight_layout()
     plt.show()
+
 if __name__ == "__main__":
     soft_robot_segmentation_result_example()
