@@ -157,6 +157,19 @@ def soft_robot_segmentation_result_example():
         poly_ref_union = polygon_list_to_union([onp.array(poly) for poly in robot_poly_ref])
         points_ref = onp.concatenate([onp.array(poly) for poly in robot_poly_ref], axis=0)
 
+        num_samples = 100
+        minx, miny, maxx, maxy = poly_ref_union.bounds
+        sample_points_in_ref = []
+        while len(sample_points_in_ref) < num_samples:
+            x = onp.random.uniform(minx, maxx, size=2*num_samples)
+            y = onp.random.uniform(miny, maxy, size=2*num_samples)
+            for xi, yi in zip(x, y):
+                pt = Point(xi, yi)
+                if poly_ref_union.contains(pt):
+                    sample_points_in_ref.append(pt)
+                if len(sample_points_in_ref) >= num_samples:
+                    break
+        
         for i, num in enumerate(num_polygons):
             robot_poly = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=num)
             points = onp.concatenate([onp.array(poly) for poly in robot_poly], axis=0)
@@ -169,7 +182,8 @@ def soft_robot_segmentation_result_example():
 
             # Monte Carlo containment ratio
             poly_union = polygon_list_to_union([onp.array(poly) for poly in robot_poly])
-            containment_ratio = monte_carlo_containment_ratio(poly_union, poly_ref_union, num_samples=1000)
+            count_inside = sum(poly_union.contains(pt) for pt in sample_points_in_ref)
+            containment_ratio = count_inside / len(sample_points_in_ref)
             containment_records[i].append(containment_ratio)
 
     # Compute statistics
