@@ -125,38 +125,54 @@ def soft_robot_segmentation_result_example():
     haus_records = [[] for _ in range(len(num_polygons))] 
 
     for q in q_batch:
+        # Reference high-resolution shape
         robot_poly_ref = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=1000)
-        points_ref = onp.concatenate([onp.array(poly) for poly in robot_poly_ref], axis=0)
+        points_ref = onp.concatenate([onp.array(poly) for poly in robot_poly_ref], axis=0)  # shape (N_ref, 2)
 
         for i, num in enumerate(num_polygons):
             robot_poly = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=num)
             points = onp.concatenate([onp.array(poly) for poly in robot_poly], axis=0)
 
+            # Hausdorff distance
             d01 = directed_hausdorff(points, points_ref)[0]
             d10 = directed_hausdorff(points_ref, points)[0]
             haus = max(d01, d10)
-
             haus_records[i].append(haus)
 
-    haus_array = onp.array([onp.array(vals) for vals in haus_records])
+    # Compute statistics
+    haus_array = jnp.array([jnp.array(hs) for hs in haus_records])  # shape (num_polygons, num_q_samples)
     haus_avg = haus_array.mean(axis=1)
     haus_std = haus_array.std(axis=1)
+    haus_std_log = jnp.log10(haus_std + 1e-10)
+    # Add small epsilon to avoid log(0) if necessary
+    haus_avg_safe = haus_avg + 1e-10
 
-    # ---- Plot with error bars ----
+    # ---- Plot with error bars (on log y-axis) ----
     plt.figure(figsize=(8, 4))
     plt.errorbar(
         num_polygons,
-        haus_avg,
-        yerr=haus_std,
+        haus_avg_safe,
+        yerr=haus_std_log,
         fmt='o-', capsize=3,
         color='blue',
         ecolor='gray',
         elinewidth=1.5,
-        label='Average ± Std'
+        label='Average ± Std Dev'
     )
+
+    # Optional: fill_between alternative to error bars
+    # plt.fill_between(
+    #     num_polygons,
+    #     haus_avg_safe - haus_std,
+    #     haus_avg_safe + haus_std,
+    #     alpha=0.2,
+    #     color='blue',
+    #     label='Std Deviation Band'
+    # )
+
     plt.xlabel("Number of Points per Segment")
-    plt.ylabel("Symmetric Hausdorff Distance (log scale)")
-    plt.yscale("log")
+    plt.ylabel("Symmetric Hausdorff Distance")
+    plt.yscale("log")  # apply log scale AFTER adding epsilon
     plt.title(f"Average Shape Error with Std Dev ({num_q_samples} Samples)")
     plt.grid(True, which='both', linestyle='--', linewidth=0.5)
     plt.legend()
