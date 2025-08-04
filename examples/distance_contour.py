@@ -130,43 +130,43 @@ def compute_distance_onelog_np(pt, robot_vertices, polygon_vertices, alpha):
     return h_olsat - error_bound
 
 
-# from jax.scipy.special import logsumexp
-# def smooth_abs(x, alpha):
-#     return x * jnp.tanh(alpha * x)
-# @jax.jit
-# def compute_distance_onelog_np(pt,robot, poly, alpha_axes, alpha_sabs=1000.):
-#     robot += pt
-#     """
-#     Distance using smooth absolute value replacement.
-#     """
-#     def get_normals(v):
-#         e = jnp.roll(v, -1, axis=0) - v
-#         n = jnp.stack([-e[:,1], e[:,0]], axis=1)
-#         return n / jnp.linalg.norm(n, axis=1, keepdims=True)
+from jax.scipy.special import logsumexp
+def smooth_abs(x, alpha):
+    return x * jnp.tanh(alpha * x)
+@jax.jit
+def compute_distance_onelog_np(pt,robot, poly, alpha_axes, alpha_sabs=1000.):
+    robot += pt
+    """
+    Distance using smooth absolute value replacement.
+    """
+    def get_normals(v):
+        e = jnp.roll(v, -1, axis=0) - v
+        n = jnp.stack([-e[:,1], e[:,0]], axis=1)
+        return n / jnp.linalg.norm(n, axis=1, keepdims=True)
     
-#     # Centroids
-#     p_robot = robot.mean(axis=0)
-#     p_poly  = poly.mean(axis=0)
-#     delta_p = p_poly - p_robot
+    # Centroids
+    p_robot = robot.mean(axis=0)
+    p_poly  = poly.mean(axis=0)
+    delta_p = p_poly - p_robot
 
-#     # Normals
-#     axes = jnp.concatenate([get_normals(robot), get_normals(poly)], axis=0)
+    # Normals
+    axes = jnp.concatenate([get_normals(robot), get_normals(poly)], axis=0)
 
-#     def half_extent(v, axis):
-#         projections = (v - v.mean(axis=0)) @ axis
-#         return smooth_abs(projections, alpha_sabs).max()
+    def half_extent(v, axis):
+        projections = (v - v.mean(axis=0)) @ axis
+        return smooth_abs(projections, alpha_sabs).max()
 
-#     axis_gaps = []
-#     for ni in axes:
-#         proj_dist = smooth_abs(ni @ delta_p, alpha_sabs)
-#         rA = half_extent(robot, ni)
-#         rB = half_extent(poly, ni)
-#         gap_i = proj_dist - (rA + rB)
-#         axis_gaps.append(gap_i)
+    axis_gaps = []
+    for ni in axes:
+        proj_dist = smooth_abs(ni @ delta_p, alpha_sabs)
+        rA = half_extent(robot, ni)
+        rB = half_extent(poly, ni)
+        gap_i = proj_dist - (rA + rB)
+        axis_gaps.append(gap_i)
 
-#     axis_gaps = jnp.stack(axis_gaps)
-#     h = (1 / alpha_axes) * logsumexp(alpha_axes * axis_gaps)
-#     return h
+    axis_gaps = jnp.stack(axis_gaps)
+    h = (1 / alpha_axes) * logsumexp(alpha_axes * axis_gaps)
+    return h
 
 # 5) Sampling grid
 N = 300
@@ -203,18 +203,28 @@ contact_idx = np.argmax(mink_shrunk_pts[:,0])
 contact_t = mink_shrunk_pts[contact_idx]
 A_contact = A_shrunk + contact_t
 
+# === Set global font size ===
+plt.rcParams.update({
+    'font.size': 16,              # main font size
+    'axes.titlesize': 20,         # title size
+    'axes.labelsize': 20,         # x/y label size
+    'xtick.labelsize': 13,        # tick label size
+    'ytick.labelsize': 13,
+    'legend.fontsize': 20
+})
+
 # 8) Plot
 plt.figure(figsize=(6,6))
-plt.plot(mink_shrunk_closed[:,0], mink_shrunk_closed[:,1], '--', color='gray', label='SAT Path')
+plt.plot(mink_shrunk_closed[:,0], mink_shrunk_closed[:,1], '--', color='gray', label='SAT Path',linewidth=2.5,)
 for alpha, (cont, col) in contours_dict.items():
-    plt.plot(cont[:,0], cont[:,1], label=f'α={alpha}', color=col, linewidth=1.5)
+    plt.plot(cont[:,0], cont[:,1], label=f'α={alpha}', color=col, linewidth=3.5, alpha=0.7)
 # Obstacle (no legend entry)
 plt.plot(*np.vstack([B, B[0]]).T, '-', color='black', linewidth=2)
 # Robot (no legend entry)
 plt.plot(*np.vstack([A_contact, A_contact[0]]).T, '-.', color='black', linewidth=2)
 
 # Legend with larger font
-legend = plt.legend(loc='upper right', fontsize=14)
+legend = plt.legend(loc='upper right',  framealpha=0.3)
 legend.set_frame_on(False)
 
 plt.axis('equal')
@@ -224,107 +234,107 @@ plt.xlabel('x')
 plt.ylabel('y')
 plt.grid(True)
 # Zoom into the top-right region
-plt.xlim(-0.5, 3.2)
-plt.ylim(-0.5, 3.2)
+plt.xlim(-0.5, 4.0)
+plt.ylim(-0.5, 4.0)
 plt.savefig("sat_contour_plot.pdf", format='pdf', bbox_inches='tight')
 
 
-import matplotlib.animation as animation
+# import matplotlib.animation as animation
 
-# === Step 1: choose the contour to follow ===
-alpha_to_follow = 50
-contour, _ = contours_dict[alpha_to_follow]
+# # === Step 1: choose the contour to follow ===
+# alpha_to_follow = 50
+# contour, _ = contours_dict[alpha_to_follow]
 
-# Downsample the contour to make animation faster
-num_frames = 100
-indices = np.linspace(0, contour.shape[0]-1, num_frames).astype(int)
-path_points = contour[indices]  # (num_frames, 2)
+# # Downsample the contour to make animation faster
+# num_frames = 100
+# indices = np.linspace(0, contour.shape[0]-1, num_frames).astype(int)
+# path_points = contour[indices]  # (num_frames, 2)
 
-# === Step 2: setup animation ===
-fig, ax = plt.subplots(figsize=(6, 6))
+# # === Step 2: setup animation ===
+# fig, ax = plt.subplots(figsize=(6, 6))
 
-# Plot background: obstacle, contours, and Minkowski sum
-ax.plot(mink_shrunk_closed[:,0], mink_shrunk_closed[:,1], '--', color='gray', label='SAT Path')
-ax.plot(contour[:, 0], contour[:, 1], label=f'α={alpha_to_follow}', color='red', linewidth=1.5)
-ax.plot(*np.vstack([B, B[0]]).T, '-', color='black', linewidth=2)  # Obstacle
+# # Plot background: obstacle, contours, and Minkowski sum
+# ax.plot(mink_shrunk_closed[:,0], mink_shrunk_closed[:,1], '--', color='gray', label='SAT Path')
+# ax.plot(contour[:, 0], contour[:, 1], label=f'α={alpha_to_follow}', color='red', linewidth=1.5)
+# ax.plot(*np.vstack([B, B[0]]).T, '-', color='black', linewidth=2)  # Obstacle
 
-# Legend and axes
-legend = ax.legend(loc='upper right', fontsize=13)
-legend.set_frame_on(False)
-ax.axis('equal')
-ax.set_xlim(-0.5, 3.2)
-ax.set_ylim(-0.5, 3.2)
-ax.set_xlabel('x')
-ax.set_ylabel('y')
-ax.grid(True)
+# # Legend and axes
+# legend = ax.legend(loc='upper right', fontsize=13)
+# legend.set_frame_on(False)
+# ax.axis('equal')
+# ax.set_xlim(-0.5, 3.2)
+# ax.set_ylim(-0.5, 3.2)
+# ax.set_xlabel('x')
+# ax.set_ylabel('y')
+# ax.grid(True)
 
-# === Step 3: animated robot and text ===
-robot_patch, = ax.plot([], [], '-.', color='red', linewidth=2)
-text_handle = ax.text(3.1, 2.7, '', ha='right', va='top', fontsize=12, weight='bold')
+# # === Step 3: animated robot and text ===
+# robot_patch, = ax.plot([], [], '-.', color='red', linewidth=2)
+# text_handle = ax.text(3.1, 2.7, '', ha='right', va='top', fontsize=12, weight='bold')
 
-# === Step 4: SAT distance function ===
-def compute_sat_distance(A: np.ndarray, B: np.ndarray) -> float:
-    def get_normals(verts):
-        edges = np.roll(verts, -1, axis=0) - verts
-        norms = np.linalg.norm(edges, axis=1)
-        valid = norms > 1e-8
-        edges = edges[valid]
-        if edges.shape[0] == 0:
-            raise ValueError("Degenerate polygon with no valid edges.")
-        normals = np.stack([-edges[:, 1], edges[:, 0]], axis=1)
-        return normals / np.linalg.norm(normals, axis=1, keepdims=True)
+# # === Step 4: SAT distance function ===
+# def compute_sat_distance(A: np.ndarray, B: np.ndarray) -> float:
+#     def get_normals(verts):
+#         edges = np.roll(verts, -1, axis=0) - verts
+#         norms = np.linalg.norm(edges, axis=1)
+#         valid = norms > 1e-8
+#         edges = edges[valid]
+#         if edges.shape[0] == 0:
+#             raise ValueError("Degenerate polygon with no valid edges.")
+#         normals = np.stack([-edges[:, 1], edges[:, 0]], axis=1)
+#         return normals / np.linalg.norm(normals, axis=1, keepdims=True)
 
-    if A.shape[0] < 3 or B.shape[0] < 3:
-        raise ValueError("Polygons must have at least 3 vertices.")
+#     if A.shape[0] < 3 or B.shape[0] < 3:
+#         raise ValueError("Polygons must have at least 3 vertices.")
 
-    axes = np.vstack([get_normals(A), get_normals(B)])
-    max_penetration = -np.inf
-    found_valid_axis = False
+#     axes = np.vstack([get_normals(A), get_normals(B)])
+#     max_penetration = -np.inf
+#     found_valid_axis = False
 
-    for axis in axes:
-        if not np.all(np.isfinite(axis)) or np.linalg.norm(axis) < 1e-8:
-            continue
+#     for axis in axes:
+#         if not np.all(np.isfinite(axis)) or np.linalg.norm(axis) < 1e-8:
+#             continue
 
-        proj_A = A @ axis
-        proj_B = B @ axis
+#         proj_A = A @ axis
+#         proj_B = B @ axis
 
-        if not np.isfinite(proj_A).all() or not np.isfinite(proj_B).all():
-            continue
+#         if not np.isfinite(proj_A).all() or not np.isfinite(proj_B).all():
+#             continue
 
-        A_min, A_max = proj_A.min(), proj_A.max()
-        B_min, B_max = proj_B.min(), proj_B.max()
-        sep = max(B_min - A_max, A_min - B_max)
+#         A_min, A_max = proj_A.min(), proj_A.max()
+#         B_min, B_max = proj_B.min(), proj_B.max()
+#         sep = max(B_min - A_max, A_min - B_max)
 
-        found_valid_axis = True
+#         found_valid_axis = True
 
-        if sep > 0:
-            return sep
-        else:
-            max_penetration = max(max_penetration, sep)
+#         if sep > 0:
+#             return sep
+#         else:
+#             max_penetration = max(max_penetration, sep)
 
-    if not found_valid_axis:
-        raise ValueError("No valid axis found: input polygons may be degenerate or contain NaNs.")
+#     if not found_valid_axis:
+#         raise ValueError("No valid axis found: input polygons may be degenerate or contain NaNs.")
 
-    return max_penetration
+#     return max_penetration
 
-# === Step 5: update function ===
-def update(frame):
-    t = path_points[frame]
-    A_moved = A_shrunk + t
-    closed = np.vstack([A_moved, A_moved[0]])
-    robot_patch.set_data(closed[:, 0], closed[:, 1])
+# # === Step 5: update function ===
+# def update(frame):
+#     t = path_points[frame]
+#     A_moved = A_shrunk + t
+#     closed = np.vstack([A_moved, A_moved[0]])
+#     robot_patch.set_data(closed[:, 0], closed[:, 1])
 
-    # SAT distance
-    dist = compute_sat_distance(A_moved, B)
-    color = 'green' if dist > 0 else 'red'
-    text_handle.set_text(f"SAT distance: {dist:.2f}")
-    text_handle.set_color(color)
+#     # SAT distance
+#     dist = compute_sat_distance(A_moved, B)
+#     color = 'green' if dist > 0 else 'red'
+#     text_handle.set_text(f"SAT distance: {dist:.2f}")
+#     text_handle.set_color(color)
 
-    return robot_patch, text_handle
+#     return robot_patch, text_handle
 
-# === Step 6: run animation ===
-ani = animation.FuncAnimation(fig, update, frames=num_frames, interval=100, blit=True)
-plt.show()
+# # === Step 6: run animation ===
+# ani = animation.FuncAnimation(fig, update, frames=num_frames, interval=100, blit=True)
+# plt.show()
 
-# === Step 7: save as GIF ===
-ani.save("SASAT.gif", writer="pillow", fps=10, dpi=100)
+# # === Step 7: save as GIF ===
+# ani.save("SASAT.gif", writer="pillow", fps=10, dpi=100)
