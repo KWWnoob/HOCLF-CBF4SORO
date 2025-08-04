@@ -109,6 +109,32 @@ def get_robot_polygons(q, robot_params, num_segments, resolution_per_segment):
     robot_polygons = jax.vmap(segment_robot, in_axes=(0, 0, 0))(start_pts, end_pts, dirs)
     return robot_polygons
 
+from shapely.geometry import Polygon, MultiPolygon, Point
+from shapely.ops import unary_union
+
+def polygon_list_to_union(poly_list: list) -> Polygon:
+    return unary_union([Polygon(p) for p in poly_list])
+
+def monte_carlo_containment_ratio(poly_A: Polygon, poly_B: Polygon, num_samples: int = 1000) -> float:
+
+    minx, miny, maxx, maxy = poly_A.bounds
+    count_inside_A = 0
+    count_inside_B = 0
+
+    for _ in range(num_samples):
+        x = onp.random.uniform(minx, maxx)
+        y = onp.random.uniform(miny, maxy)
+        pt = Point(x, y)
+        if poly_A.contains(pt):
+            count_inside_A += 1
+            if poly_B.contains(pt):
+                count_inside_B += 1
+
+    if count_inside_A == 0:
+        return 0.0
+    return count_inside_B / count_inside_A
+
+
 '''
 Example Scripts
 '''
@@ -120,14 +146,16 @@ def soft_robot_segmentation_result_example():
     max_vals = jnp.array([ 0.5,  0.2,  0.5,  0.5,  0.2,  0.5])
     q_batch = min_vals + rand_vals * (max_vals - min_vals)
 
-    num_polygons = jnp.arange(5, 1000, 50)
+    num_polygons = jnp.arange(5, 1005, 50)
     num_q_samples = q_batch.shape[0]
     haus_records = [[] for _ in range(len(num_polygons))] 
+    containment_records = [[] for _ in range(len(num_polygons))]  # 新增记录
 
     for q in q_batch:
         # Reference high-resolution shape
         robot_poly_ref = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=1000)
-        points_ref = onp.concatenate([onp.array(poly) for poly in robot_poly_ref], axis=0)  # shape (N_ref, 2)
+        poly_ref_union = polygon_list_to_union([onp.array(poly) for poly in robot_poly_ref])
+        points_ref = onp.concatenate([onp.array(poly) for poly in robot_poly_ref], axis=0)
 
         for i, num in enumerate(num_polygons):
             robot_poly = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=num)
@@ -139,11 +167,15 @@ def soft_robot_segmentation_result_example():
             haus = max(d01, d10)
             haus_records[i].append(haus)
 
+            # Monte Carlo containment ratio
+            poly_union = polygon_list_to_union([onp.array(poly) for poly in robot_poly])
+            containment_ratio = monte_carlo_containment_ratio(poly_union, poly_ref_union, num_samples=1000)
+            containment_records[i].append(containment_ratio)
+
     # Compute statistics
     haus_array = jnp.array([jnp.array(hs) for hs in haus_records])  # shape (num_polygons, num_q_samples)
     haus_avg = haus_array.mean(axis=1)
     haus_std = haus_array.std(axis=1)
-    haus_std_log = jnp.log10(haus_std + 1e-10)
     # Add small epsilon to avoid log(0) if necessary
     haus_avg_safe = haus_avg + 1e-10
 
@@ -152,23 +184,13 @@ def soft_robot_segmentation_result_example():
     plt.errorbar(
         num_polygons,
         haus_avg_safe,
-        yerr=haus_std_log,
+        yerr = haus_std,
         fmt='o-', capsize=3,
         color='blue',
         ecolor='gray',
         elinewidth=1.5,
         label='Average ± Std Dev'
     )
-
-    # Optional: fill_between alternative to error bars
-    # plt.fill_between(
-    #     num_polygons,
-    #     haus_avg_safe - haus_std,
-    #     haus_avg_safe + haus_std,
-    #     alpha=0.2,
-    #     color='blue',
-    #     label='Std Deviation Band'
-    # )
 
     plt.xlabel("Number of Points per Segment")
     plt.ylabel("Symmetric Hausdorff Distance")
@@ -179,5 +201,32 @@ def soft_robot_segmentation_result_example():
     plt.tight_layout()
     plt.show()
 
+        # Compute containment ratio statistics
+    containment_array = jnp.array([jnp.array(cs) for cs in containment_records])  # shape (num_polygons, num_q_samples)
+    containment_avg = containment_array.mean(axis=1)
+    containment_std = containment_array.std(axis=1)
+
+    # ---- Plot with error bars ----
+    plt.figure(figsize=(8, 4))
+    plt.errorbar(
+        num_polygons,
+        containment_avg,
+        yerr=containment_std,
+        fmt='s--',
+        capsize=3,
+        color='green',
+        ecolor='lightgray',
+        elinewidth=1.5,
+        label='Containment Ratio ± Std Dev'
+    )
+
+    plt.xlabel("Number of Points per Segment")
+    plt.ylabel("Containment Ratio (Monte Carlo)")
+    plt.title(f"Containment Estimation with Std Dev ({num_q_samples} Samples)")
+    plt.ylim(0.0, 1.05)
+    plt.grid(True, linestyle='--', linewidth=0.5)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 if __name__ == "__main__":
     soft_robot_segmentation_result_example()
