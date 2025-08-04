@@ -96,19 +96,6 @@ def segment_robot(current, next, orientation):
     seg_poly = segmented_polygon(current, next, orientation, robot_radius)
     return (seg_poly)
 
-def get_robot_polygons(q, robot_params, num_segments, resolution_per_segment):
-    # Compute FK
-    p_group = batched_forward_kinematics_fn(q, robot_params, resolution_per_segment * num_segments)
-    p_ps = p_group[:, :2]
-    orientations = p_group[:, 2]
-
-    # Segment-wise positions and orientations
-    start_pts = p_ps[:-1]
-    end_pts = p_ps[1:]
-    dirs = orientations[:-1]
-
-    # Polygons per segment
-    return vmap(segment_robot, in_axes=(0, 0, 0))(start_pts, end_pts, dirs)
 '''
 Example Scripts
 '''
@@ -145,11 +132,26 @@ def soft_robot_segmentation_result_example():
     q_ts, _ = jnp.split(sol.ys, 2, axis=1)
 
     hausdorff_list = []
+    for q in q_ts[::20]:
+        p_group0 = batched_forward_kinematics_fn(q, robot_params, 20 * num_segments) # 20 points per segments
+        p_group1 = batched_forward_kinematics_fn(q, robot_params, 1000 * num_segments) # 1000 points per segments
 
-    for idx, q in enumerate(q_ts[::20]):
-        # Get low/high resolution polygons
-        robot_poly_group0 = get_robot_polygons(q, robot_params, num_segments, 20)
-        robot_poly_group1 = get_robot_polygons(q, robot_params, num_segments, 1000)
+        p_ps_group0 = p_group0[:, :2]
+        p_orientations_group0 = p_group0[:, 2]
+
+        p_ps_group1 = p_group1[:, :2]
+        p_orientations_group1 = p_group1[:, 2]
+
+        starting_points_group0 = p_ps_group0[:-1]
+        ending_points_group0 = p_ps_group0[1:]
+        forward_directions_group0 = p_orientations_group0[:-1]
+
+        starting_points_group1 = p_ps_group1[:-1]
+        ending_points_group1 = p_ps_group1[1:]
+        forward_directions_group1 = p_orientations_group1[:-1]
+
+        robot_poly_group0 = vmap(segment_robot, in_axes=(0, 0, 0))(starting_points_group0, ending_points_group0, forward_directions_group0)
+        robot_poly_group1 = vmap(segment_robot, in_axes=(0, 0, 0))(starting_points_group1, ending_points_group1, forward_directions_group1)
 
         # Convert to numpy for distance calc and plotting
         points0 = onp.concatenate([onp.array(poly) for poly in robot_poly_group0], axis=0)
