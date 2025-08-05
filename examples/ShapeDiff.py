@@ -191,7 +191,7 @@ def soft_robot_segmentation_result_example():
     )
 
 
-    plt.xlabel("Number of Soft Robot Convex Polygons $N_\mathrm{srpoly}$",fontsize=20)
+    plt.xlabel("Number of Soft Robot Convex Polygons $N_\\mathrm{srpoly}$", fontsize=20)
     plt.ylabel("Symmetric Hausdorff Distance (logarithmic scale)", fontsize=20)
     plt.yscale("log")  # apply log scale AFTER adding epsilon
     plt.title(f"Average Shape Error with Std Dev ({num_q_samples} Samples)",fontsize=20)
@@ -208,7 +208,7 @@ def soft_robot_segmentation_result_example():
     plt.figure(figsize=(8, 8))
     plt.errorbar(num_polygons, containment_avg, yerr=containment_std, fmt='o-', capsize=3)
     plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.2f}"))
-    plt.xlabel("Number of Soft Robot Convex Polygons $N_\mathrm{srpoly}$",fontsize=20)
+    plt.xlabel("Number of Soft Robot Convex Polygons $N_\\mathrm{srpoly}$", fontsize=20)
     plt.ylabel("Fraction of Area not inside Reference",fontsize=20)
     plt.grid(True, which='both', linestyle='--', linewidth=1.0)
     plt.title("Soft Robot Body Not Contained in Convex Polygons",fontsize=20)
