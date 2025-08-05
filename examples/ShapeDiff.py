@@ -137,7 +137,7 @@ def soft_robot_segmentation_result_example():
     max_vals = jnp.array([ 0.5,  0.2,  0.5,  0.5,  0.2,  0.5])
     q_batch = min_vals + rand_vals * (max_vals - min_vals)
 
-    num_polygons = jnp.arange(5, 1000, 50)
+    num_polygons = jnp.arange(5, 1000, 35)
     num_q_samples = q_batch.shape[0]
     haus_records = [[] for _ in range(len(num_polygons))]
     containment_ratios = [[] for _ in range(len(num_polygons))] 
@@ -162,10 +162,10 @@ def soft_robot_segmentation_result_example():
             union_test = polys_to_union_shapely(robot_poly)
             try:
                 area_test = union_test.area
-                area_diff = union_test.difference(union_ref).area
-                # area_common = union_test.intersection(union_ref).area
+                # area_diff = union_test.difference(union_ref).area
+                area_common = union_test.intersection(union_ref).area
                 # error_ratio = area_diff / area_test  # percentage not covered by A
-                containment_ratio = area_diff / area_ref
+                containment_ratio = area_common / area_ref
             except Exception:
                 containment_ratio = jnp.nan
 
@@ -176,7 +176,6 @@ def soft_robot_segmentation_result_example():
     haus_avg = haus_array.mean(axis=1)
     haus_std = haus_array.std(axis=1)
     # Add small epsilon to avoid log(0) if necessary
-
     # ---- Plot with error bars (on log y-axis) ----
     plt.figure(figsize=(8, 8))
     plt.errorbar(
@@ -190,13 +189,18 @@ def soft_robot_segmentation_result_example():
         label='Average ± Std Dev'
     )
 
+    x_target = 40
+    if x_target in num_polygons:
+        idx = int((jnp.where(num_polygons == x_target))[0])
+        y_target = float(haus_avg[idx])
+        plt.plot(x_target, y_target, marker='x', markersize=12, color='red', label='Experimental Resolution')
 
-    plt.xlabel("Number of Soft Robot Convex Polygons $N_\\mathrm{srpoly}$", fontsize=20)
+    plt.xlabel(r"Number of Soft Robot Convex Polygons $N_\mathrm{srpoly}$", fontsize=20)
     plt.ylabel("Symmetric Hausdorff Distance (logarithmic scale)", fontsize=20)
-    plt.yscale("log")  # apply log scale AFTER adding epsilon
-    plt.title(f"Average Shape Error with Std Dev ({num_q_samples} Samples)",fontsize=20)
+    plt.yscale("log")
+    plt.title(f"Average Shape Error with Std Dev ({num_q_samples} Samples)", fontsize=20)
     plt.grid(True, which='both', linestyle='--', linewidth=1.0)
-    plt.legend()
+    plt.legend(loc='upper right', fontsize=14)
     plt.tight_layout()
     plt.savefig("hausdorff_vs_resolution.pdf")
     # plt.show()
@@ -207,14 +211,21 @@ def soft_robot_segmentation_result_example():
 
     plt.figure(figsize=(8, 8))
     plt.errorbar(num_polygons, containment_avg, yerr=containment_std, fmt='o-', capsize=3)
-    plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.2f}"))
-    plt.xlabel("Number of Soft Robot Convex Polygons $N_\\mathrm{srpoly}$", fontsize=20)
-    plt.ylabel("Fraction of Area not inside Reference",fontsize=20)
+    plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.4f}"))
+
+    x_target = 40
+    if x_target in num_polygons:
+        idx = int((jnp.where(num_polygons == x_target))[0])
+        y_target = float(containment_avg[idx])
+        plt.plot(x_target, y_target, marker='x', markersize=12, color='red', label='Experimental Resolution')
+
+    plt.xlabel(r"Number of Soft Robot Convex Polygons $N_\mathrm{srpoly}$", fontsize=20)
+    plt.ylabel("Fraction of Area not inside Reference", fontsize=20)
     plt.grid(True, which='both', linestyle='--', linewidth=1.0)
-    plt.title("Soft Robot Body Not Contained in Convex Polygons",fontsize=20)
+    plt.title("Soft Robot Body Not Contained in Convex Polygons", fontsize=20)
+    plt.legend(loc='lower right', fontsize=14)
     plt.tight_layout()
     plt.savefig("containment_vs_resolution.pdf")
-    # plt.show()
 
 if __name__ == "__main__":
     soft_robot_segmentation_result_example()
