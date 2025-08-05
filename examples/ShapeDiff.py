@@ -14,7 +14,9 @@ import matplotlib.pyplot as plt
 import numpy as onp
 from pathlib import Path
 
-
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
+plt.rcParams['pdf.fonttype'] = 42
 '''
 1) Importing necessary parameters and functions from JSRM (JAX Soft Robot Models).
 '''
@@ -109,40 +111,20 @@ def get_robot_polygons(q, robot_params, num_segments, resolution_per_segment):
     robot_polygons = jax.vmap(segment_robot, in_axes=(0, 0, 0))(start_pts, end_pts, dirs)
     return robot_polygons
 
-from shapely.geometry import Polygon, MultiPolygon, Point
-from shapely.ops import unary_union
-
-def polygon_list_to_union(poly_list: list) -> Polygon:
-    return unary_union([Polygon(p) for p in poly_list])
-
-def monte_carlo_containment_ratio(poly_A: Polygon, poly_B: Polygon, num_samples: int = 1000) -> float:
-
-    minx, miny, maxx, maxy = poly_A.bounds
-    count_inside_A = 0
-    count_inside_B = 0
-
-    for _ in range(num_samples):
-        x = onp.random.uniform(minx, maxx)
-        y = onp.random.uniform(miny, maxy)
-        pt = Point(x, y)
-        if poly_A.contains(pt):
-            count_inside_A += 1
-            if poly_B.contains(pt):
-                count_inside_B += 1
-
-    if count_inside_A == 0:
-        return 0.0
-    return count_inside_B / count_inside_A
-
-def sample_one_point_in_polygon(polygon: Polygon) -> Point:
-    minx, miny, maxx, maxy = polygon.bounds
-    for _ in range(100): 
-        x = onp.random.uniform(minx, maxx)
-        y = onp.random.uniform(miny, maxy)
-        pt = Point(x, y)
-        if polygon.contains(pt):
-            return pt
-    raise RuntimeError("Failed to sample a point inside polygon after 100 attempts.")
+def polys_to_union_shapely(polygons):
+    """Convert JAX/Numpy polygons to Shapely union"""
+    shapely_polys = []
+    for poly in polygons:
+        try:
+            arr = onp.array(poly)
+            if not onp.allclose(arr[0], arr[-1]):
+                arr = onp.concatenate([arr, arr[0:1]], axis=0)  # ensure closed
+            p = Polygon(arr)
+            if p.is_valid:
+                shapely_polys.append(p)
+        except Exception:
+            continue
+    return unary_union(shapely_polys)
 
 '''
 Example Scripts
@@ -155,19 +137,17 @@ def soft_robot_segmentation_result_example():
     max_vals = jnp.array([ 0.5,  0.2,  0.5,  0.5,  0.2,  0.5])
     q_batch = min_vals + rand_vals * (max_vals - min_vals)
 
-    num_polygons = jnp.arange(5, 1005, 50)
+    num_polygons = jnp.arange(5, 1000, 50)
     num_q_samples = q_batch.shape[0]
-    haus_records = [[] for _ in range(len(num_polygons))] 
-    containment_records = [[] for _ in range(len(num_polygons))]  # 新增记录
+    haus_records = [[] for _ in range(len(num_polygons))]
+    containment_ratios = [[] for _ in range(len(num_polygons))] 
 
     for q in q_batch:
         # Reference high-resolution shape
         robot_poly_ref = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=1000)
-        points_ref = onp.array(
-            unary_union([Polygon(onp.array(poly)) for poly in robot_poly_ref]).exterior.coords
-        )
-
-        
+        points_ref = onp.concatenate([onp.array(poly) for poly in robot_poly_ref], axis=0)  # shape (N_ref, 2)
+        union_ref = polys_to_union_shapely(robot_poly_ref)
+        area_ref = union_ref.area
         for i, num in enumerate(num_polygons):
             robot_poly = get_robot_polygons(q, robot_params, num_segments, resolution_per_segment=num)
             points = onp.concatenate([onp.array(poly) for poly in robot_poly], axis=0)
@@ -178,25 +158,31 @@ def soft_robot_segmentation_result_example():
             haus = max(d01, d10)
             haus_records[i].append(haus)
 
-            # Monte Carlo containment ratio
-            poly_union = polygon_list_to_union([onp.array(poly) for poly in robot_poly])
-            count_inside = sum(poly_union.contains(Point(pt)) for pt in points_ref)
-            containment_ratio = count_inside / len(points_ref)
+            # Containment ratio
+            union_test = polys_to_union_shapely(robot_poly)
+            try:
+                area_test = union_test.area
+                area_diff = union_test.difference(union_ref).area
+                # area_common = union_test.intersection(union_ref).area
+                # error_ratio = area_diff / area_test  # percentage not covered by A
+                containment_ratio = area_diff / area_ref
+            except Exception:
+                containment_ratio = jnp.nan
 
-            containment_records[i].append(containment_ratio)
+            containment_ratios[i].append(containment_ratio)
+
     # Compute statistics
     haus_array = jnp.array([jnp.array(hs) for hs in haus_records])  # shape (num_polygons, num_q_samples)
     haus_avg = haus_array.mean(axis=1)
     haus_std = haus_array.std(axis=1)
     # Add small epsilon to avoid log(0) if necessary
-    haus_avg_safe = haus_avg + 1e-10
 
     # ---- Plot with error bars (on log y-axis) ----
-    plt.figure(figsize=(8, 4))
+    plt.figure(figsize=(8, 8))
     plt.errorbar(
         num_polygons,
-        haus_avg_safe,
-        yerr = haus_std,
+        haus_avg,
+        yerr=haus_std,
         fmt='o-', capsize=3,
         color='blue',
         ecolor='gray',
@@ -204,41 +190,31 @@ def soft_robot_segmentation_result_example():
         label='Average ± Std Dev'
     )
 
-    plt.xlabel("Number of Points per Segment")
-    plt.ylabel("Symmetric Hausdorff Distance")
+
+    plt.xlabel("Number of Soft Robot Convex Polygons $N_\mathrm{srpoly}$",fontsize=20)
+    plt.ylabel("Symmetric Hausdorff Distance (logarithmic scale)", fontsize=20)
     plt.yscale("log")  # apply log scale AFTER adding epsilon
-    plt.title(f"Average Shape Error with Std Dev ({num_q_samples} Samples)")
-    plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+    plt.title(f"Average Shape Error with Std Dev ({num_q_samples} Samples)",fontsize=20)
+    plt.grid(True, which='both', linestyle='--', linewidth=1.0)
     plt.legend()
     plt.tight_layout()
-    plt.show()
+    plt.savefig("hausdorff_vs_resolution.pdf")
+    # plt.show()
 
-        # Compute containment ratio statistics
-    containment_array = jnp.array([jnp.array(cs) for cs in containment_records])  # shape (num_polygons, num_q_samples)
-    containment_avg = containment_array.mean(axis=1)
-    containment_std = containment_array.std(axis=1)
+    containment_array = jnp.array([jnp.array(x) for x in containment_ratios])
+    containment_avg = jnp.nanmean(containment_array, axis=1)
+    containment_std = jnp.nanstd(containment_array, axis=1)
 
-    # ---- Plot with error bars ----
-    plt.figure(figsize=(8, 4))
-    plt.errorbar(
-        num_polygons,
-        containment_avg,
-        yerr=containment_std,
-        fmt='s--',
-        capsize=3,
-        color='green',
-        ecolor='lightgray',
-        elinewidth=1.5,
-        label='Containment Ratio ± Std Dev'
-    )
-
-    plt.xlabel("Number of Points per Segment")
-    plt.ylabel("Containment Ratio (Monte Carlo)")
-    plt.title(f"Containment Estimation with Std Dev ({num_q_samples} Samples)")
-    plt.ylim(0.0, 1.05)
-    plt.grid(True, linestyle='--', linewidth=0.5)
-    plt.legend()
+    plt.figure(figsize=(8, 8))
+    plt.errorbar(num_polygons, containment_avg, yerr=containment_std, fmt='o-', capsize=3)
+    plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.2f}"))
+    plt.xlabel("Number of Soft Robot Convex Polygons $N_\mathrm{srpoly}$",fontsize=20)
+    plt.ylabel("Fraction of Area not inside Reference",fontsize=20)
+    plt.grid(True, which='both', linestyle='--', linewidth=1.0)
+    plt.title("Soft Robot Body Not Contained in Convex Polygons",fontsize=20)
     plt.tight_layout()
-    plt.show()
+    plt.savefig("containment_vs_resolution.pdf")
+    # plt.show()
+
 if __name__ == "__main__":
     soft_robot_segmentation_result_example()
