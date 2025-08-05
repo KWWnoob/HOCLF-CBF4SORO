@@ -191,7 +191,7 @@ def soft_robot_segmentation_result_example():
 
     x_target = 40
     if x_target in num_polygons:
-        idx = int((jnp.where(num_polygons == x_target))[0])
+        idx = jnp.where(num_polygons == x_target)[0].item()
         y_target = float(haus_avg[idx])
         plt.plot(x_target, y_target, marker='x', markersize=12, color='red', label='Experimental Resolution')
 
@@ -215,7 +215,7 @@ def soft_robot_segmentation_result_example():
 
     x_target = 40
     if x_target in num_polygons:
-        idx = int((jnp.where(num_polygons == x_target))[0])
+        idx = jnp.where(num_polygons == x_target)[0].item()
         y_target = float(containment_avg[idx])
         plt.plot(x_target, y_target, marker='x', markersize=12, color='red', label='Experimental Resolution')
 
