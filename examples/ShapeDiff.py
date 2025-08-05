@@ -178,15 +178,14 @@ def soft_robot_segmentation_result_example():
     # Add small epsilon to avoid log(0) if necessary
     # ---- Plot with error bars (on log y-axis) ----
     plt.figure(figsize=(8, 8))
-    plt.errorbar(
+    plt.plot(num_polygons, haus_avg, 'o-', color='blue', label='Average')
+    plt.fill_between(
         num_polygons,
-        haus_avg,
-        yerr=haus_std,
-        fmt='o-', capsize=3,
+        haus_avg - haus_std,
+        haus_avg + haus_std,
         color='blue',
-        ecolor='gray',
-        elinewidth=1.5,
-        label='Average ± Std Dev'
+        alpha=0.2,
+        label='± Std Dev'
     )
 
     x_target = 40
@@ -210,7 +209,15 @@ def soft_robot_segmentation_result_example():
     containment_std = jnp.nanstd(containment_array, axis=1)
 
     plt.figure(figsize=(8, 8))
-    plt.errorbar(num_polygons, containment_avg, yerr=containment_std, fmt='o-', capsize=3)
+    plt.plot(num_polygons, containment_avg, 'o-', color='green', label='Average')
+    plt.fill_between(
+        num_polygons,
+        containment_avg - containment_std,
+        containment_avg + containment_std,
+        color='green',
+        alpha=0.2,
+        label='± Std Dev'
+    )
     plt.gca().yaxis.set_major_formatter(plt.FuncFormatter(lambda y, _: f"{y:.4f}"))
 
     x_target = 40
