@@ -445,8 +445,8 @@ def compute_contact_torque(
         dir_vec = vec / (jnp.linalg.norm(vec) + 1e-8)
 
         # Step 3: compute repulsive force (only significant if d < 0)
-        f_mag = k * jax.nn.softplus(-d / eps)
-        # f_mag = (k * jax.nn.elu(-d / eps) + k) * eps
+        # f_mag = k * jax.nn.softplus(-d / eps)
+        f_mag = (k * jax.nn.elu(-d / eps) + k) * eps
         f_vec = f_mag * dir_vec  
         J_c = compute_contact_jacobian_fn(q, p_c, s_i)
         return J_c.T @ f_vec  # (3N,)

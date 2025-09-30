@@ -83,7 +83,7 @@ num_points = 20*num_segments
 end_p_ps_indices = (jnp.arange(1, num_segments+1) * num_points // num_segments) - 1
 
 @jax.jit
-def compute_distance(robot_vertices, polygon_vertices, alpha=3000):
+def compute_distance(robot_vertices, polygon_vertices, alpha=1000):
     rv = robot_vertices
     
     def get_normals(verts):
@@ -171,70 +171,7 @@ def half_circle_to_polygon(center, forward_direction, radius, num_arc_points=30)
     # the shape is a convex polygon approximating the half circle with a straight chord closing the shape.
     return arc_points
 
-def connect_project(cA, cB, polyB):
-    """
-    1) Compute centroids of polyA and polyB.
-    2) Draw the ray from centroid A to centroid B.
-    3) Find the first intersection of that ray with polyB's boundary.
-      hit_point  -- point on B where the cA→cB ray first intersects
-    """
 
-    v = cB - cA  # direction vector from A to B
-
-    # -- Ray-segment intersection loop --
-    best_t = jnp.inf
-    hit = None
-    for i in range(len(polyB)):
-        A_edge = polyB[i]
-        B_edge = polyB[(i+1) % len(polyB)]
-        d = B_edge - A_edge
-
-        M = jnp.column_stack((v, -d))
-        if jnp.linalg.matrix_rank(M) < 2:
-            continue
-
-        t, u = jnp.linalg.solve(M, A_edge - cA)
-        # t >=0 → along ray direction; 0<=u<=1 → within the segment
-        if (t >= 0) and (0 <= u <= 1) and (t < best_t):
-            best_t = t
-            hit = cA + t*v
-
-    return hit
-
-def penetration_to_contact_force(penetration_depth: jnp.ndarray, k_contact: float, eps: float = 1e-8) -> jnp.ndarray:
-    """
-    Smooth contact force using LSE-based spring model (soft-max approximation of -d if d<0).
-    
-    Args:
-        penetration_depth: (n,) array
-        k_contact: contact stiffness
-        eps: smoothing parameter
-    
-    Returns:
-        (n,) array of contact force magnitudes
-    """
-    # Use logsumexp for better numerical stability
-    scaled = jnp.stack([jnp.zeros_like(penetration_depth), -penetration_depth / eps], axis=0)
-    smooth_penetration = eps * logsumexp(scaled, axis=0)
-    return k_contact * smooth_penetration
-
-def compute_contact_force(p_robot_end, p_obs, r_robot, r_obj, c_damp = 50):
-    #TODO: check the force formulation
-    diff = p_robot_end - p_obs
-    distance = jnp.linalg.norm(diff)
-    
-    eps = 1e-6
-    safe_distance = jnp.maximum(distance, eps) # ensuring minimum distance does not go to zero 
-    
-    penetration = jnp.maximum((r_robot + r_obj) - safe_distance, 0.0)
-    # jax.debug.print("Cooridnates = {}{}", p_robot_end,p_obs)
-    normal = diff / safe_distance
-    
-    F_spring = 600 * penetration  
-    
-    F_contact = jnp.where(penetration > 0, (F_spring) * normal, jnp.zeros_like(normal))
-    
-    return F_contact
 
 def soft_robot_with_safety_contact_CBFCLF_example():
     
@@ -286,23 +223,22 @@ def soft_robot_with_safety_contact_CBFCLF_example():
 
             '''Characteristic of robot'''
             self.s_ps = jnp.linspace(0, robot_length * num_segments, 20 * num_segments) # segmented
-            self.q_des_arary_1 = jnp.array([-jnp.pi*2,0.5,1.0])
-            # self.q_des_array_0 = jnp.array([-jnp.pi*1.8, 0.3, 0.4])/2
-            self.q_des_arary_3 = jnp.array([jnp.pi*2, 0.3, 0.4])
-            # self.q_des_arary_2 = jnp.array([jnp.pi*2, 0.3, 0.4])/2
-            self.q_des = jnp.concatenate([self.q_des_arary_1])# destination
+            # self.q_des_arary_1 = jnp.array([-jnp.pi*2,0.5,1.0])
+            # # self.q_des_array_0 = jnp.array([-jnp.pi*1.8, 0.3, 0.4])/2
+            # self.q_des_arary_3 = jnp.array([jnp.pi*2, 0.3, 0.4])
+            # # self.q_des_arary_2 = jnp.array([jnp.pi*2, 0.3, 0.4])/2
+            # self.q_des = jnp.concatenate([self.q_des_arary_1])# destination
 
             self.p_des_array_1 = jnp.array([-0.1, 0.12, +jnp.pi/3 ])
             self.p_des_array_2 = jnp.array([-0.1*1.3, 0.12*2.3, +jnp.pi/2])
 
             self.p_des = jnp.stack([self.p_des_array_1, self.p_des_array_2]) #shape 2,2
-
             '''Select the end of each segment'''
             self.indices = end_p_ps_indices
 
             '''Contact model Parameter'''
             self.contact_spring_constant = 2000 #contact force model
-            self.maximum_withhold_force = 20
+            self.maximum_withhold_force = 10
 
             '''Real Input'''
             # self.actuation_mask = jnp.array([1, 0, 1])
@@ -355,105 +291,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             zero_block = jnp.zeros((q.shape[0], g_mat.shape[1]))
 
             return jnp.concatenate([zero_block, g_mat], axis=0)  # shape (2n, m)
-                
-         
-        # def V_2(self, z, z_des = None, kappa = 200) -> jnp.ndarray:
-        #     # CLF: tracking error for both the middle point and the tip (last point)
-            
-        #     # Split state into positions (q) and velocities (q_d)
-        #     q, q_d = jnp.split(z, 2)
-        #     # Compute forward kinematics for the current configuration.
-        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
-        #     # print(p)
-        #     v = batched_forward_kinematics_fn(self.robot_params, q_d, self.s_ps)
-        #     p_list = p[self.indices, :]
-        #     v_list = v[self.indices, :]
-            
-        #     error_mid = jnp.sqrt((p_list[num_segments-2, :2] - self.p_des_array_1[:2])**2)
-        #     error_speed_mid = jnp.linalg.norm(v_list[num_segments-2, :])
-        #     # error_mid = jnp.linalg.norm(
-        #     #     p[19, :2] - self.p_des_array_1[:2]
-        #     # )
-        #     error_tip = jnp.sqrt(
-        #         (p[-1, :2] - self.p_des_array_2[:2])**2
-        #     )
-        #     # error_tip = error_tip*2
-        #     # jax.debug.print("tip-pos = {}", error_tip)
-        #     error_speed_end = jnp.linalg.norm(v_list[num_segments-1, :])
-        #     # error = jnp.sum((self.p_des[:2] - p[-1,:2])**2)
-        #     # error = jnp.concatenate([error_tip]).reshape(-1) 
-        #     # normalized_pd = jnp.tanh(error / 0.01)
-        
-        #     # Option: Return the errors as a single vector by concatenating the two.
-        #     # V_total = jnp.concatenate(error)
-        #     return jnp.concatenate([error_tip])
-    
-
-        # def h_2(self, z, kappa=50) -> jnp.ndarray:
-        #     """
-        #     Barrier function combining:
-        #     1) Joint-limit part: normalized |q + 0.2|/π for each segment
-        #     2) Obstacle part: smooth-min of normalized penetration depths via log-sum-exp
-
-        #     Returns a 1D array of length num_segments+1, where:
-        #     - entries 0..num_segments-1 are norm_state[i]
-        #     - entry -1 is h_return (shape (1,))
-        #     """
-        #     # 1) split state
-        #     q, _ = jnp.split(z, 2)
-
-        #     # ---- norm_state part ----
-        #     # smooth absolute: ≈ |q_i + 0.2|
-        #     state1 = jnp.sqrt((q[0] + 0.4)**2)          
-        #     state3 = jnp.sqrt((q[2] + 0.1)**2)     
-        #     state4 = jnp.sqrt((q[3] + 0.4)**2)          
-        #     state6 = jnp.sqrt((q[5] + 0.1)**2)     
-        #     state = jnp.concatenate([state1[None,...],state3[None,...],state4[None,...],state6[None,...]])
-
-        #     # ---- obstacle penetration part ----
-        #     # forward kinematics
-        #     p = batched_forward_kinematics_fn(self.robot_params, q, self.s_ps)
-        #     p_ps = p[:, :2]
-        #     p_orientation = p[:, 2]
-
-        #     #  Consider segments between consecutive points (excluding the last point for segments)
-        #     current_points = p_ps[:-1]
-        #     next_points = jnp.concatenate([p_ps[1:-1] * 1, p_ps[-1][None, :]])
-        #     orientations = p_orientation[:-1]
-            
-        #     def segment_robot(current,next,orientation):
-        #         seg_poly = segmented_polygon(current, next, orientation, robot_radius)
-        #         return(seg_poly)
-            
-        #     robot_poly = jax.vmap(segment_robot)(current_points, next_points, orientations)
-
-        #     pairwise_penetration,_ = jax.vmap( lambda poly: jax.vmap(lambda obs: compute_distance(poly, obs))(self.poly_obstacle_pos)
-        #                                     )(robot_poly)
-            
-        #     end_start = p_ps[-2]
-        #     end_end = p_ps[-1]
-        #     d = (end_end - end_start)/jnp.linalg.norm(end_end - end_start)
-        #     angle = jnp.arctan2(d[1], d[0])
-
-        #     robot_tip = half_circle_to_polygon(p_ps[-1],angle, robot_radius)
-        #     tip_penetration,_ = jax.vmap(compute_distance, in_axes=(0, None))(self.poly_obstacle_pos, robot_tip)
-        #     tip_penetration = tip_penetration[None,...]
-
-        #     penetration_depth_poly = jnp.concatenate([pairwise_penetration, tip_penetration])
-        #     normalized_pd = jnp.tanh(penetration_depth_poly / 0.005)
-        #     h_return = -1 / kappa * jnp.log(jnp.sum(jnp.exp(-kappa * normalized_pd)))
-
-        #     # ---- combine ----
-        #     # concatenate norm_state (shape n) and h_return (shape 1)
-        #     return jnp.concatenate([state, jnp.array([h_return])])
-
-
-        # def h_2(self, z, kappa = 50) -> jnp.ndarray:
-        #     q, _ = jnp.split(z, 2)
-        #     state1 = jnp.sqrt((q+0.2*jnp.ones_like(q))**2)
-        #     # state2 = jnp.sqrt((q-0.2*jnp.ones_like(q))**2)
-        #     # state = jnp.concatenate([state1, state2])
-        #     return state1.reshape(-1)
         
         def V_2(self, z, z_des) -> jnp.ndarray:
 
@@ -531,7 +368,6 @@ def soft_robot_with_safety_contact_CBFCLF_example():
             return penetration_depth_poly
             # return jnp.array([10.0])
         
-
         def alpha_2(self, h_2):
             return h_2*100  #constant, increase for smaller affected zone
         
@@ -541,14 +377,12 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     config = SoRoConfig()
     clf_cbf = CLFCBF.from_config(config)
 
-    def closed_loop_ode_fn(t: float, y: Array, q_des: Array) -> Array:
+    def closed_loop_ode_fn(t: float, y: Array, z_des: Array) -> Array:
         # split the state vector into the configuration and velocity
         q, q_d = jnp.split(y, 2)
-        q_d_des = jnp.zeros_like(q_des)
-        q_des = jnp.concatenate([q_des, q_d_des])
         
         # evaluate the control policy
-        u_reduced = clf_cbf.controller(y,q_des)
+        u_reduced = clf_cbf.controller(y,z_des)
         # u_full = jnp.zeros_like(q)  # or jnp.zeros((3,))
         # u_full = u_full.at[config.active_idx].set(u_reduced)
 
@@ -581,15 +415,23 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     y0 = jnp.concatenate([q0, q_d0])
 
     # define the desired configuration
-    q_des = config.q_des
+    z_des = config.p_des.reshape(-1)
+    z_dot_des = jnp.zeros_like(z_des)
+    z_des = jnp.concatenate([z_des, z_dot_des])
+
+    # z_des = jnp.stack([
+    #     jnp.concatenate([p.flatten(), jnp.zeros(3 * num_segments)])
+    #     for p in config.p_des
+    #     ])  # shape (num_waypoints, num_segments * 3* 2)
+
 
     # define the sampling and simulation time step
     # dt = 2e-4
     # sim_dt = 5e-5
-    # dt = 2e-3
-    # sim_dt = 1e-3
-    dt = 5e-4
+    dt = 2e-3
     sim_dt = 1e-4
+    # dt = 5e-4
+    # sim_dt = 1e-4
 
 
     # define the time steps
@@ -599,114 +441,39 @@ def soft_robot_with_safety_contact_CBFCLF_example():
     ode_term = dx.ODETerm(closed_loop_ode_fn)
 
     # solve the ODE
-    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0, q_des, saveat=dx.SaveAt(ts=ts), max_steps=None)
+    sol = dx.diffeqsolve(ode_term, dx.Tsit5(), ts[0], ts[-1], sim_dt, y0, z_des, saveat=dx.SaveAt(ts=ts), max_steps=None)
 
     # extract the results
     q_ts, _ = jnp.split(sol.ys, 2, axis=1)
+    
+    # u_list = []
+    # for y in sol.ys:
+    #     u = clf_cbf.controller(y, z_des)
+    #     u_list.append(onp.array(u))
+    # u_array = onp.stack(u_list)
 
-    u_list = []
-    for y in sol.ys:
-        u = clf_cbf.controller(y, q_des)
-        u_list.append(onp.array(u))
-    u_array = onp.stack(u_list)
-
-    # Plot control inputs over time
-    plt.figure(figsize=(7, 4))
-    for i in range(u_array.shape[1]):
-        plt.plot(ts, u_array[:, i], label=f'$u_{i}$')
-    plt.xlabel("Time [s]")
-    plt.ylabel("Control Input $u$")
-    plt.title("Control Inputs Over Time")
-    plt.grid(True)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-    i_focus = 10
-
-    def get_contact_matrix(full_distance_array, threshold=0.0002):
-        """Return a boolean contact matrix where distance < threshold."""
-        return full_distance_array < threshold
-
-    # ————————————————————————————————————————
-    # 1. Configuration and initialization
-    times = onp.array(ts[::20])
-    full_distance_list = []
-    chi_ps_list = []
-    distance_list = []
-    force_list = []
-    flag_list = []
-
-    # ————————————————————————————————————————
-    # 2. Forward kinematics, segmentation, and distance computation
-    for q in q_ts[::20]:
-        p = batched_forward_kinematics_fn(robot_params, q, config.s_ps)
-        p_ps = p[:, :2]
-        chi_ps_list.append(onp.array(p_ps))
-
-        cur_pts = p_ps[:-1]
-        nxt_pts = p_ps[1:]
-        ors = jnp.arctan2((nxt_pts - cur_pts)[:, 1], (nxt_pts - cur_pts)[:, 0])
-
-        segs = jax.vmap(segmented_polygon, in_axes=(0, 0, 0, None))(
-            cur_pts, nxt_pts, ors, robot_radius
-        )
-
-        def distance_to_all_obstacles(seg_poly):
-            dists, flags = jax.vmap(lambda obs_poly: compute_distance(seg_poly, obs_poly))(
-                config.poly_obstacle_pos
-            )
-            return dists
-
-        d_segs = jax.vmap(distance_to_all_obstacles)(segs)
-
-        d_focus = float(d_segs[0, 0])
-        distance_list.append(d_focus)
-        force_list.append(config.maximum_withhold_force - penetration_to_contact_force(d_segs[10,1],config.contact_spring_constant))
-        # Then still add to full_distance_list
-        full_distance_list.append(d_segs)
-    force_array = onp.array(force_list)
-    nonzero_indices = onp.argwhere(force_array != 0)
-    # print(nonzero_indices)
-
-    # ————————————————————————————————————————
-    # 3. Stack all distances into a full distance array
-    full_distance_array = jnp.stack(full_distance_list)  # (timestamp, segment, obstacle)
-
-    # ————————————————————————————————————————
-    # 4. Detect collisions (contacts)
-    contacts_by_time = get_contact_matrix(full_distance_array, threshold=0.002)
-
-    # ————————————————————————————————————————
-    # 5. Extract valid contact points
-    T, N_seg, N_obs = contacts_by_time.shape
-    contact_points_list = []
-
-    for t in range(T):
-        for seg_id in range(N_seg):
-            for obs_id in range(N_obs):
-                if contacts_by_time[t, seg_id, obs_id]:
-                    seg_poly_center = chi_ps_list[t][seg_id]
-                    obs_poly = config.poly_obstacle_pos[obs_id]
-
-                    contact_pt = connect_project(seg_poly_center, jnp.mean(obs_poly, axis=0), obs_poly)
-
-                    if not jnp.isnan(contact_pt).any():
-                        contact_points_list.append((
-                            t, seg_id, obs_id,
-                            float(contact_pt[0]), float(contact_pt[1])
-                        ))
-
-    contact_points_array = onp.array(contact_points_list)  # Now works perfectly
-    # print(f"contact_points_array shape = {contact_points_array.shape}")
-    # print(contact_points_array)
-
-    # plt.figure(figsize=(6,4))
-    # plt.plot(times, force_list, linewidth=2)
+    # # Plot control inputs over time
+    # plt.figure(figsize=(7, 4))
+    # for i in range(u_array.shape[1]):
+    #     plt.plot(ts, u_array[:, i], label=f'$u_{i}$')
     # plt.xlabel("Time [s]")
-    # plt.ylabel(f"Signed distance of segment {i_focus}")
-    # plt.title("Force to Obstacle Over Time (Focused)")
+    # plt.ylabel("Control Input $u$")
+    # plt.title("Control Inputs Over Time")
     # plt.grid(True)
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()
+
+    # # === Plot V2 over time (scalar V_2) ===
+    # V2_fn = jax.jit(lambda y: config.V_2(y, z_des))          # y: (n,)
+    # V2_vals = jax.vmap(V2_fn)(sol.ys)                        # (T,)
+
+    # plt.figure(figsize=(7,4))
+    # plt.plot(ts, onp.array(V2_vals))
+    # plt.xlabel("Time [s]")
+    # plt.ylabel(r"$V_2(z(t))$")
+    # plt.title("CLF $V_2$ along trajectory")
+    # plt.grid(True, ls="--", alpha=0.5)
     # plt.tight_layout()
     # plt.show()
     

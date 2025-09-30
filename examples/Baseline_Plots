@@ -57,7 +57,7 @@ for i in range(len(file_paths)):
 plt.xlabel('Time (s)')
 plt.ylabel('Regulation Error (m)')
 plt.ylim(0, 0.4)
-plt.legend(loc='upper right', framealpha=0.3)  # Transparent legend
+plt.legend(loc='upper right')  # Transparent legend
 plt.grid(True)
 plt.tight_layout()
 plt.savefig('tracking_error_over_time.pdf')
