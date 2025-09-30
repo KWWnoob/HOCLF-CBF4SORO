@@ -1,5 +1,5 @@
 # Safety-Aware Control of Continuum Soft Robots
-Control of soft robots taking into account safety constraints (e.g., with control barrier functions)
+Control of soft robots taking into account force safety constraints (e.g., with control barrier functions)
 
 ## Installation
 
