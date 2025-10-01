@@ -1,4 +1,4 @@
-# Safety-Aware Control of Continuum Soft Robots
+# Contact-Aware Safety in Soft Robots Using High-Order Control Barrier and Lyapunov Functions
 
 This repository provides the official implementation of the paper:
 
@@ -45,7 +45,7 @@ If you find this repository useful, please cite:
 ```bash
 @article{wong2025contactaware,
   title   = {Contact-Aware Safety in Soft Robots Using High-Order Control Barrier and Lyapunov Functions},
-  author  = {Wong, Kiwan and St{\"o}lzle, Maximilian and Xiao, Wei and Della Santina, Cosimo and Rus, Daniela and Zardini, Gioele},
+  author  = {Wong, Kiwan and St{\ö}lzle, Maximilian and Xiao, Wei and Della Santina, Cosimo and Rus, Daniela and Zardini, Gioele},
   journal = {arXiv preprint arXiv:2505.03841},
   year    = {2025},
   url     = {https://arxiv.org/abs/2505.03841}
