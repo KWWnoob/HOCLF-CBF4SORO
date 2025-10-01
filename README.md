@@ -1,4 +1,4 @@
-# Safety-Aware Control of Continuum Soft Robots
+# Contact-Aware Safety in Soft Robots Using High-Order Control Barrier and Lyapunov Functions
 
 This repository provides the official implementation of the paper:
 
