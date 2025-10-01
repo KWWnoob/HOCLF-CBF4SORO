@@ -39,3 +39,14 @@ First, source the necessary environment variables:
 source ./01-configure-env-vars.sh
 ```
 
+## 📖 Citation
+If you find this repository useful, please cite:
+
+```bash
+@article{wong2025contactaware,
+  title   = {Contact-Aware Safety in Soft Robots Using High-Order Control Barrier and Lyapunov Functions},
+  author  = {Wong, Kiwan and St{\"o}lzle, Maximilian and Xiao, Wei and Della Santina, Cosimo and Rus, Daniela and Zardini, Gioele},
+  journal = {arXiv preprint arXiv:2505.03841},
+  year    = {2025},
+  url     = {https://arxiv.org/abs/2505.03841}
+}
