@@ -1,13 +1,35 @@
 # Safety-Aware Control of Continuum Soft Robots
-Control of soft robots taking into account force safety constraints (e.g., with control barrier functions)
 
-## Installation
+This repository provides the official implementation of the paper:
 
-To install the package, clone the repository and run the following command in the root directory to install the requirements:
+**Contact-Aware Safety in Soft Robots Using High-Order Control Barrier and Lyapunov Functions**  
+Kiwan Wong, Maximilian Stölzle, Wei Xiao, Cosimo Della Santina, Daniela Rus, Gioele Zardini  
+arXiv:2505.03841 • [Preprint Link](https://arxiv.org/abs/2505.03841)
+
+---
+
+## 🚀 Overview
+
+We propose a unified framework for **safety-aware control of continuum soft robots**.  
+Our method leverages **High-Order Control Barrier Functions (HOCBFs)** and **High-Order Control Lyapunov Functions (HOCLFs)**, integrated with a differentiable soft robot model, to guarantee safety while maintaining task performance.
+
+Key features:
+
+- ✅ **Force-aware safety constraints** during environment contact  
+- ✅ **Flexible objectives**: shape regulation, end-effector tracking, manipulation  
+- ✅ **Differentiable SAT-based metric (DCSAT)** for conservative & efficient distance computation  
+- ✅ **Simulation experiments** validating safety and performance across tasks  
+
+---
+
+## 📦 Installation
+
+Clone the repository and install the requirements:
 
 ```bash
+git clone https://github.com/KWWnoob/HOCLF-HOCBF4SORO.git
+cd HOCLF-HOCBF4SORO
 pip install -r requirements.txt
-```
 
 ## Usage
 
@@ -16,3 +38,4 @@ First, source the necessary environment variables:
 ```bash
 source ./01-configure-env-vars.sh
 ```
+
