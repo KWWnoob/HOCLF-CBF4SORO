@@ -7,21 +7,6 @@ tracking workspace waypoints using a **task-space PID controller** augmented
 by an **artificial potential field (APF)** for obstacle avoidance. Distances
 to polygonal obstacles are computed with a differentiable, conservative SAT
 (log-sum-exp) metric, and contact-like wrenches are mapped to joint torques.
-
-What’s inside
--------------
-• Models & kinematics: `jsrm.systems.planar_pcs.factory` provides FK, dynamics, Jacobians.  
-• Body geometry: each backbone section → **rectangle**, tip → **half-circle** polygon.  
-• DCSAT distance: `compute_distance(...)` uses log-sum-exp SAT + error bound to yield
-  smooth signed clearance h (h>0 safe, h<0 penetration).  
-• Closest points: `find_closest_segment_point_and_direction(...)` to build APF directions.  
-• APF torques: `compute_artificial_potential_torque(...)` creates **repulsive wrenches**
-  that grow as distance drops below a safety radius ρ₀, then uses Jacobians to obtain
-  generalized torques.  
-• Task-space PID: `nominal_controller(...)` computes operational-space forces (Kp, Kd, Ki),
-  adds APF torques and gravity, and maps to joint torques (uses mass-weighted J⁺ᵀ).  
-• Dynamics rollout: `diffrax.Tsit5()` integrates the full state.  
-
 """
 
 import csv

@@ -9,19 +9,6 @@ tracking workspace waypoints with a **PID controller** augmented by
 
 It combines differentiable dynamics, smooth conservative distance computation,
 and workspace trajectory objectives for safe closed-loop motion.
-
-What’s inside
--------------
-• Models & kinematics: `jsrm.systems.planar_pcs.factory` provides FK, dynamics, Jacobians.  
-• Body geometry: each backbone section → **rectangle**, tip → **half-circle** polygon.  
-• DCSAT distance: `compute_distance(...)` implements a log-sum-exp SAT relaxation 
-  with error bound, yielding smooth signed clearance h (h>0 safe, h<0 penetration).  
-• Safety barrier torques: converts penetration depth from DCSAT into smooth repulsive 
-  wrenches, then projects them to joint torques via contact Jacobians.  
-• PID controller: regulates workspace waypoints; Safety Barrier Functions correct 
-  actions near obstacles to guarantee safety.  
-• Dynamics rollout: `diffrax.Tsit5()` integrates the robot’s full state.
-
 """
 
 

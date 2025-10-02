@@ -3,18 +3,7 @@ Soft Robot HOCLF, no barrier functions
 =================================================================
 
 This script simulates a planar soft robot (PCS: piecewise-constant strain)
-tracking waypoints using a **HOCLF–HOCBF  controller**. No safey is enforced.
-
-What’s inside
--------------
-• Models & kinematics: `jsrm.systems.planar_pcs.factory` provides FK, dynamics, Jacobians.  
-• Body geometry: each backbone section → **rectangle**, tip → **half-circle** polygon.  
-
-• Closest points: `find_closest_segment_point_and_direction(...)` to build repulsion directions.  
-• Soft contact torques: `compute_contact_torque(...)` applies ELU/softplus-style repulsion
-  from segment–obstacle closest points, then uses contact Jacobians to get generalized
-  torques; these enter both model drift and execution.  
-• HOCLF: a rarget is defined
+tracking waypoints using a **HOCLF controller**. No safey is enforced.
 """
 
 import csv

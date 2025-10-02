@@ -8,25 +8,6 @@ differentiable, conservative SAT (log-sum-exp) distance, and smooth
 contact-like wrenches are mapped to joint torques. The controller balances
 task tracking (CLF) and obstacle avoidance (CBF) while rolling out the full
 robot dynamics.
-
-What’s inside
--------------
-• Models & kinematics: `jsrm.systems.planar_pcs.factory` provides FK, dynamics, Jacobians.  
-• Body geometry: each backbone section → **rectangle**, tip → **half-circle** polygon.  
-• DCSAT distance: `compute_distance(...)` uses log-sum-exp SAT + error bound to yield
-  smooth signed clearance h (h>0 safe, h<0 penetration).  
-• Closest points: `find_closest_segment_point_and_direction(...)` to build repulsion directions.  
-• Soft contact torques: `compute_contact_torque(...)` applies ELU/softplus-style repulsion
-  from segment–obstacle closest points, then uses contact Jacobians to get generalized
-  torques; these enter both model drift and execution.  
-• HOCLF–HOCBF : `SoRoConfig(CLFCBFConfig)` defines
-  - Drift/actuation: `f(z)`, `g(z)` from dynamics (with contact torques),
-  - CLF task error: `V_2(z, z_des)` on segment endpoints (mid + tip),
-  - CBF safety: `h_2(z)` aggregates segment/tip clearances vs obstacles,
-  - Class-K/weights: `alpha_2(.)`, `gamma_2(.)` and relaxation penalties.  
-• Dynamics rollout: `diffrax.Tsit5()` integrates the closed loop; waypoint switching
-  triggers when the tracking error falls below a threshold.
-
 """
 
 import csv
