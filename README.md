@@ -16,7 +16,7 @@ Our method leverages **High-Order Control Barrier Functions (HOCBFs)** and **Hig
 Key features:
 
 - ✅ **Force-aware safety constraints** during environment contact  
-- ✅ **Flexible objectives**: shape regulation, end-effector tracking, manipulation  
+- ✅ **Flexible objectives**: shape regulation, end-effector tracking  
 - ✅ **Differentiable SAT-based metric (DCSAT)** for conservative & efficient distance computation  
 - ✅ **Simulation experiments** validating safety and performance across tasks  
 
@@ -30,8 +30,9 @@ Clone the repository and install the requirements:
 git clone https://github.com/KWWnoob/HOCLF-HOCBF4SORO.git
 cd HOCLF-HOCBF4SORO
 pip install -r requirements.txt
+```
 
-## Usage
+## 📦 Usage
 
 First, source the necessary environment variables:
 
@@ -43,10 +44,10 @@ source ./01-configure-env-vars.sh
 If you find this repository useful, please cite:
 
 ```bash
-@article{wong2025contactaware,
+@article{wong2025contact,
   title   = {Contact-Aware Safety in Soft Robots Using High-Order Control Barrier and Lyapunov Functions},
-  author  = {Wong, Kiwan and St{\ö}lzle, Maximilian and Xiao, Wei and Della Santina, Cosimo and Rus, Daniela and Zardini, Gioele},
-  journal = {arXiv preprint arXiv:2505.03841},
+  author  = {Wong, Kiwan and Stölzle, Maximilian and Xiao, Wei and Della Santina, Cosimo and Rus, Daniela and Zardini, Gioele},
+  journal = {IEEE Robotics and Automation Letters},
   year    = {2025},
-  url     = {https://arxiv.org/abs/2505.03841}
+  note    = {Accepted}
 }
