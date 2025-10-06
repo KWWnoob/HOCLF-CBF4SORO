@@ -46,22 +46,22 @@ We provide several example scripts under the [`examples/`](examples/) folder
 to demonstrate different control strategies and safety mechanisms for the
 planar PCS soft robot:
 
-- **`simulate_planar_pcs_contact.py`**  
+- **`simulate_planar_hoclf_contact_force_limit_hocbf.py`**  
   CLF–CBF controller with contact-aware safety constraints. Demonstrates full
   safety-critical control with DCSAT distances and smooth contact forces.
 
-- **`simulate_planar_pcs_NOCBF.py`**  
+- **`simulate_planar_hoclf_contact_avoidance.py`**  
   Pure CLF (stabilization/tracking) without barrier constraints. Useful as a
   baseline to compare the effect of safety enforcement.
 
-- **`simulate_planar_pcs_nocontact.py`**  
+- **`simulate_planar_hoclf_contact_avoidance.py`**  
   CLF–CBF controller with no force allowed. 
 
-- **`simulate_planar_pcs_PID.py`**  
+- **`simulate_planar_hoclf_contact_force_limit_pid.py`**  
   Task-space PID controller with DCSAT-based safety barrier. A classical
   baseline combining PID tracking with modern safety metrics.
 
-- **`simulate_planar_pcs_Potential.py`**  
+- **`simulate_planar_hoclf_apf.py`**  
   PID controller augmented with an **Artificial Potential Field (APF)** for
   obstacle avoidance, using DCSAT distances to shape repulsive forces.
 
