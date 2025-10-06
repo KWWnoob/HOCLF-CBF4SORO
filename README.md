@@ -27,7 +27,7 @@ Key features:
 Clone the repository and install the requirements:
 
 ```bash
-git clone https://github.com/KWWnoob/HOCLF-HOCBF4SORO.git
+git clone https://github.com/mit-zardini-lab/contact-safe-soft-robot-control.git
 cd HOCLF-HOCBF4SORO
 pip install -r requirements.txt
 ```
