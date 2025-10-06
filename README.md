@@ -28,7 +28,7 @@ Clone the repository and install the requirements:
 
 ```bash
 git clone https://github.com/mit-zardini-lab/contact-safe-soft-robot-control.git
-cd HOCLF-HOCBF4SORO
+cd contact-safe-soft-robot-control
 pip install -r requirements.txt
 ```
 
